@@ -145,8 +145,15 @@ describe("preferences", () => {
   });
 
   it("a kept preview survives the /build redirect hop only, then cancels on /capabilities", async () => {
-    // 沒有工作區：/overview 被導向 /build，仍算同一次導覽
-    vi.stubGlobal("fetch", vi.fn(async () => json(404, { error: { code: "not_found", message: "找不到資源" } })));
+    // 沒有工作區：/overview 被導向 /build，仍算同一次導覽（view 讀取成功、workspace 為 null）
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/v1/workspace/view"
+          ? json(200, { workspace: null, csrf: "c", version: 0, report: null })
+          : json(404, { error: { code: "not_found", message: "找不到資源" } }),
+      ),
+    );
     const { prefs } = await stores();
     const { createAppRouter } = await import("../src/router");
     const { createMemoryHistory } = await import("vue-router");

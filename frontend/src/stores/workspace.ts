@@ -44,6 +44,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   const designPreview = ref(false);
 
   const hasWorkspace = computed(() => Boolean(view.value?.workspace));
+  /**
+   * 已讀取過但沒有 view（請求失敗）：狀態未知，不能當成「沒有工作區」導向 /build，
+   * 由 App 顯示錯誤與「重新讀取」。
+   */
+  const loadFailed = computed(() => loaded.value && view.value === null);
 
   let firstLoad: Promise<void> | null = null;
 
@@ -186,6 +191,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     loaded,
     designPreview,
     hasWorkspace,
+    loadFailed,
     refresh,
     ready,
     run,
