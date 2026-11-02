@@ -8,6 +8,9 @@ from src.core.db import make_engine
 from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
+from src.modules.catalog.router import router as catalog_router
+from src.modules.workspace.retention import start_scheduler
+from src.modules.workspace.router import router as workspace_router
 
 APP_NAME = "erpcrm"
 APP_VERSION = "0.1.0"
@@ -29,6 +32,8 @@ def health() -> dict[str, object]:
 # 新模組的 router 加在這個清單即可，create_app 會依序掛上
 ROUTERS: list[APIRouter] = [
     health_router,
+    catalog_router,
+    workspace_router,
 ]
 
 
@@ -38,13 +43,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     engine = make_engine(settings)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        yield
-        engine.dispose()
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 公開展示模式才啟用 72 小時保留排程
+        app.state.scheduler = start_scheduler(engine) if settings.app.public_demo else None
+        try:
+            yield
+        finally:
+            if app.state.scheduler is not None:
+                app.state.scheduler.shutdown(wait=False)
+            engine.dispose()
 
     app = FastAPI(title="星軌 ERP-CRM", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
+    app.state.scheduler = None
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(SessionCookieMiddleware)
     register_error_handlers(app)
