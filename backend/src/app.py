@@ -17,6 +17,7 @@ from src.modules.projects.router import router as projects_router
 from src.modules.sales.router import router as sales_router
 from src.modules.services.router import router as services_router
 from src.modules.wallets.router import router as wallets_router
+from src.modules.workbench.router import router as workbench_router
 from src.modules.workspace.retention import start_scheduler
 from src.modules.workspace.router import router as workspace_router
 
@@ -52,6 +53,7 @@ ROUTERS: list[APIRouter] = [
     manufacturing_router,
     projects_router,
     administration_router,
+    workbench_router,
 ]
 
 
