@@ -22,8 +22,8 @@ def _seq() -> Column:  # type: ignore[type-arg]
 class WalletRow(SQLModel, table=True):
     __tablename__ = "wallet"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     kind: str
     name: str
     balance_minor: int = Field(default=0, sa_type=BigInteger)
@@ -35,8 +35,8 @@ class WalletRow(SQLModel, table=True):
 class LedgerRow(SQLModel, table=True):
     __tablename__ = "ledger"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     kind: str
     reference_id: uuid.UUID
     created_at: datetime = Field(sa_column=_tz())
@@ -46,6 +46,7 @@ class LedgerRow(SQLModel, table=True):
 class LedgerEntryRow(SQLModel, table=True):
     __tablename__ = "ledger_entry"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     ledger_id: uuid.UUID = Field(primary_key=True)
     idx: int = Field(primary_key=True, sa_type=SmallInteger)
     wallet_id: uuid.UUID

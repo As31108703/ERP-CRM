@@ -16,8 +16,8 @@ def _tz(nullable: bool = False) -> Column:  # type: ignore[type-arg]
 class AdmUnit(SQLModel, table=True):
     __tablename__ = "adm_unit"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     name: str
     kind: str
     parent_id: uuid.UUID | None = None
@@ -29,8 +29,8 @@ class AdmUnit(SQLModel, table=True):
 class AdmStaff(SQLModel, table=True):
     __tablename__ = "adm_staff"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     code: str
     alias: str
     unit_id: uuid.UUID
@@ -43,8 +43,8 @@ class AdmStaff(SQLModel, table=True):
 class AdmShift(SQLModel, table=True):
     __tablename__ = "adm_shift"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     staff_id: uuid.UUID
     unit_id: uuid.UUID
     start_at: datetime = Field(sa_column=_tz())
@@ -59,8 +59,8 @@ class AdmShift(SQLModel, table=True):
 class AdmAttendance(SQLModel, table=True):
     __tablename__ = "adm_attendance"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     staff_id: uuid.UUID
     unit_id: uuid.UUID
     start_at: datetime = Field(sa_column=_tz())
@@ -75,8 +75,8 @@ class AdmAttendance(SQLModel, table=True):
 class AdmRequest(SQLModel, table=True):
     __tablename__ = "adm_request"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     type: str
     staff_id: uuid.UUID | None = None
     unit_id: uuid.UUID
@@ -95,6 +95,7 @@ class AdmRequest(SQLModel, table=True):
 class AdmRequestTransition(SQLModel, table=True):
     __tablename__ = "adm_request_transition"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     request_id: uuid.UUID = Field(primary_key=True)
     seq: int = Field(primary_key=True)
     status: str
@@ -105,8 +106,8 @@ class AdmRequestTransition(SQLModel, table=True):
 class AdmEquipment(SQLModel, table=True):
     __tablename__ = "adm_equipment"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     code: str
     name: str
     unit_id: uuid.UUID
@@ -118,8 +119,8 @@ class AdmEquipment(SQLModel, table=True):
 class AdmReservation(SQLModel, table=True):
     __tablename__ = "adm_reservation"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     equipment_id: uuid.UUID
     staff_id: uuid.UUID
     start_at: datetime = Field(sa_column=_tz())
@@ -133,8 +134,8 @@ class AdmReservation(SQLModel, table=True):
 class AdmNotice(SQLModel, table=True):
     __tablename__ = "adm_notice"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     title: str
     body: str
     unit_id: uuid.UUID | None = None
@@ -150,8 +151,8 @@ class AdmChange(SQLModel, table=True):
 
     __tablename__ = "adm_change"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(primary_key=True)
-    workspace_id: uuid.UUID
     kind: str
     record_id: uuid.UUID
     at: datetime = Field(sa_column=_tz())

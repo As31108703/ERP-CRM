@@ -17,7 +17,6 @@ from src.modules.administration.entity import (
     RECORD_LIMITS,
     TRANSITION_LIMIT,
     AdmChange,
-    AdmRequest,
     AdmRequestTransition,
     by_seq,
 )
@@ -109,8 +108,7 @@ def _rows(db: Session, model: type[SQLModel], workspace_id: str) -> list[Any]:
 def _transitions(db: Session, workspace_id: str) -> dict[uuid.UUID, list[dict[str, Any]]]:
     stmt = (
         select(AdmRequestTransition)
-        .join(AdmRequest, AdmRequest.id == AdmRequestTransition.request_id)  # type: ignore[arg-type]
-        .where(AdmRequest.workspace_id == uuid.UUID(workspace_id))
+        .where(AdmRequestTransition.workspace_id == uuid.UUID(workspace_id))
         .order_by(AdmRequestTransition.request_id, AdmRequestTransition.seq)  # type: ignore[arg-type]
     )
     out: dict[uuid.UUID, list[dict[str, Any]]] = {}
@@ -380,7 +378,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
             db.flush()
     for request_id, entries in transitions.items():
         for seq, entry in enumerate(entries, start=1):
-            db.add(AdmRequestTransition(request_id=request_id, seq=seq, **entry))
+            db.add(AdmRequestTransition(workspace_id=wid, request_id=request_id, seq=seq, **entry))
     for change in changes:
         db.add(AdmChange(workspace_id=wid, **change))
         db.flush()

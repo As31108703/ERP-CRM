@@ -26,8 +26,8 @@ _TOTALS = text(
     """
     WITH lines AS (
       SELECT l.id, l.price_minor, l.cost_minor, l.shipped_quantity, l.returned_quantity
-      FROM order_line l JOIN sales_order o ON o.id = l.order_id
-      WHERE o.workspace_id = :w
+      FROM order_line l
+      WHERE l.workspace_id = :w
     )
     SELECT
       (SELECT COALESCE(SUM(price_minor * shipped_quantity), 0) FROM lines) AS sales,
@@ -35,7 +35,7 @@ _TOTALS = text(
       (SELECT COALESCE(SUM(cost_minor * (shipped_quantity - returned_quantity)), 0)
         FROM lines) AS estimated_cost,
       (SELECT COALESCE(SUM(c.cost_minor * (c.quantity - c.returned)), 0)
-        FROM shipped_cost_lot c JOIN lines ON lines.id = c.line_id) AS cost,
+        FROM shipped_cost_lot c WHERE c.workspace_id = :w) AS cost,
       (SELECT COALESCE(SUM(stock_value_minor), 0) FROM product WHERE workspace_id = :w)
         AS inventory_value,
       (SELECT COALESCE(SUM(paid_minor), 0) FROM service WHERE workspace_id = :w)

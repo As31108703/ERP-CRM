@@ -13,8 +13,8 @@ from src.modules.sales.service import cost_lots_of, lines_of, list_orders
 
 def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
     rows = list_orders(db, workspace_id)
-    lines = lines_of(db, [o.id for o in rows])
-    lots = cost_lots_of(db, [line.id for group in lines.values() for line in group])
+    lines = lines_of(db, workspace_id, [o.id for o in rows])
+    lots = cost_lots_of(db, workspace_id, [line.id for group in lines.values() for line in group])
     orders = [
         {
             "id": str(o.id),
@@ -84,6 +84,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
             line_id = uuid.UUID(line["id"])
             db.add(
                 OrderLineRow(
+                    workspace_id=ws,
                     id=line_id,
                     order_id=order_id,
                     idx=idx,
@@ -100,6 +101,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
             for lot in line.get("shipped_cost_lots", []):
                 db.add(
                     ShippedCostLotRow(
+                        workspace_id=ws,
                         line_id=line_id,
                         quantity=lot["quantity"],
                         cost_minor=lot["cost_minor"],

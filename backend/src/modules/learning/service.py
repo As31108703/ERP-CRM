@@ -205,7 +205,10 @@ def session_out(s: LearningSessionRow) -> dict[str, Any]:
 
 def _snapshots(db: Session, w: World, session: LearningSessionRow, run: Run) -> dict[str, Any]:
     """只保留與 history 相符之檢查點的前後讀值。"""
-    stmt = select(LearningCheckpointRow).where(LearningCheckpointRow.session_id == session.id)
+    stmt = select(LearningCheckpointRow).where(
+        LearningCheckpointRow.workspace_id == session.workspace_id,
+        LearningCheckpointRow.session_id == session.id,
+    )
     out: dict[str, Any] = {}
     for row in db.exec(stmt):
         c = run.cp(row.step_id)
@@ -445,6 +448,7 @@ def _execute(
 
     ctx.db.add(
         LearningCheckpointRow(
+            workspace_id=session.workspace_id,
             session_id=session.id,
             step_id=step.id,
             action=step.action,

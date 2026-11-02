@@ -25,8 +25,8 @@ class CrmRecordRow(SQLModel, table=True):
 
     __tablename__ = "crm_record"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     collection: str
     name: str | None = None
     title: str | None = None
@@ -47,6 +47,7 @@ class CrmRecordRow(SQLModel, table=True):
 class DealFollowupRow(SQLModel, table=True):
     __tablename__ = "deal_followup"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     deal_id: uuid.UUID
     note: str
@@ -57,8 +58,8 @@ class DealFollowupRow(SQLModel, table=True):
 class QuoteRow(SQLModel, table=True):
     __tablename__ = "quote"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     case_id: uuid.UUID
     amount_minor: int = Field(sa_type=BigInteger)
     expires_at: datetime = Field(sa_column=_tz())

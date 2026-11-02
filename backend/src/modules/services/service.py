@@ -20,7 +20,7 @@ from src.modules.services.entity import ServiceDeliveryRow, ServiceRow
 from src.modules.wallets import service as wallets
 from src.modules.wallets.service import LedgerView, ledger_invalid, register_ledger_rule
 from src.platform.context import CommandContext
-from src.platform.records import find_record, parse_id, record_missing
+from src.platform.records import find_record, record_missing, scoped_get
 
 DRAFT = "draft"
 CONFIRMED = "confirmed"
@@ -47,14 +47,17 @@ def list_services(db: Session, workspace_id: str) -> list[ServiceRow]:
 
 
 def deliveries_of(
-    db: Session, service_ids: list[uuid.UUID]
+    db: Session, workspace_id: str, service_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[ServiceDeliveryRow]]:
-    """各服務的交付，依交付順序。"""
+    """工作區內各服務的交付，依交付順序。"""
     out: dict[uuid.UUID, list[ServiceDeliveryRow]] = {sid: [] for sid in service_ids}
     if service_ids:
         stmt = (
             select(ServiceDeliveryRow)
-            .where(ServiceDeliveryRow.service_id.in_(service_ids))  # type: ignore[attr-defined]
+            .where(
+                ServiceDeliveryRow.workspace_id == uuid.UUID(workspace_id),
+                ServiceDeliveryRow.service_id.in_(service_ids),  # type: ignore[attr-defined]
+            )
             .order_by(ServiceDeliveryRow.service_id, ServiceDeliveryRow.seq)  # type: ignore[arg-type]
         )
         for d in db.exec(stmt):
@@ -70,9 +73,8 @@ def delivery_digest(service_id: uuid.UUID, revision: int, artifact_ref: str) -> 
 
 def get_service(ctx: CommandContext, service_id: object) -> ServiceRow:
     """工作區內的服務；不存在時 404 simulation_record_missing。"""
-    parsed = parse_id(service_id)
-    row = ctx.db.get(ServiceRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id:
+    row = scoped_get(ctx.db, ServiceRow, ctx.workspace_id, service_id)
+    if row is None:
         raise record_missing()
     return row
 
@@ -140,8 +142,9 @@ def deliver_service(ctx: CommandContext, p: dict[str, Any]) -> str:
     ref = p.get("artifact_ref")
     if not isinstance(ref, str):
         raise Problem(422, "delivery_invalid", "交付摘要不符")
-    revision = len(deliveries_of(ctx.db, [s.id])[s.id]) + 1
+    revision = len(deliveries_of(ctx.db, ctx.workspace_id, [s.id])[s.id]) + 1
     delivery = ServiceDeliveryRow(
+        workspace_id=s.workspace_id,
         service_id=s.id,
         revision=revision,
         artifact_ref=ref,
@@ -156,9 +159,8 @@ def deliver_service(ctx: CommandContext, p: dict[str, Any]) -> str:
 
 def _review(ctx: CommandContext, p: dict[str, Any], status: str) -> str:
     s = get_service(ctx, p.get("id"))
-    delivery_id = parse_id(p.get("delivery_id"))
-    delivery = next((d for d in deliveries_of(ctx.db, [s.id])[s.id] if d.id == delivery_id), None)
-    if delivery is None:
+    delivery = scoped_get(ctx.db, ServiceDeliveryRow, ctx.workspace_id, p.get("delivery_id"))
+    if delivery is None or delivery.service_id != s.id:
         raise record_missing()
     ensure(
         s.status == SUBMITTED
@@ -222,8 +224,8 @@ def _service_pay_rule(
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """service.pay：買家 → 商家。參照的服務不存在 404 record_missing；
     來源不是買家 422 ledger_invalid。"""
-    service = db.get(ServiceRow, ledger.reference_id)
-    if service is None or str(service.workspace_id) != workspace_id:
+    service = scoped_get(db, ServiceRow, workspace_id, ledger.reference_id)
+    if service is None:
         raise Problem(404, "record_missing", "找不到工作區紀錄")
     business = ledger.system["business"].id
     source = next((w for w, _ in ledger.entries if w != business), None)

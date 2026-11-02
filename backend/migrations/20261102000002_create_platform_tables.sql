@@ -44,14 +44,16 @@ CREATE TABLE receipt (
 
 CREATE INDEX receipt_session_seq_idx ON receipt (session_id, seq);
 
--- 操作歷史：每個成功的業務命令一筆
+-- 操作歷史：每個成功的業務命令一筆。id 以工作區為範圍（匯入時沿用備份的 id，
+-- 同一份備份可以匯入多個工作區）
 CREATE TABLE history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
     action TEXT NOT NULL,
     result TEXT,
     version INT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workspace_id, id)
 );
 
 CREATE INDEX history_workspace_version_idx ON history (workspace_id, version);

@@ -35,9 +35,9 @@ def check_manufacturing(db: Session, workspace_id: str) -> None:
     check_record_limit(db, BomRow, workspace_id)
     check_record_limit(db, WorkOrderRow, workspace_id)
     boms = list_boms(db, workspace_id)
-    components = components_of(db, [b.id for b in boms])
+    components = components_of(db, workspace_id, [b.id for b in boms])
     orders = list_work_orders(db, workspace_id)
-    lots = consumed_lots_of(db, [o.id for o in orders])
+    lots = consumed_lots_of(db, workspace_id, [o.id for o in orders])
     product_ids = {p.id for p in list_products(db, workspace_id)}
     bom_by_id = {b.id: b for b in boms}
 

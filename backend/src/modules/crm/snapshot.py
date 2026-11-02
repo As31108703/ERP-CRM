@@ -58,7 +58,7 @@ def quote_out(q: QuoteRow) -> dict[str, Any]:
 def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
     out: dict[str, Any] = {c: [] for c in RECORD_COLLECTIONS}
     rows = all_records(db, workspace_id)
-    followups = followups_of(db, [r.id for r in rows if r.collection == "deals"])
+    followups = followups_of(db, workspace_id, [r.id for r in rows if r.collection == "deals"])
     for r in rows:
         item = record_out(r)
         if r.collection == "deals":
@@ -111,6 +111,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
             for f in r.get("followups", []) if collection == "deals" else []:
                 db.add(
                     DealFollowupRow(
+                        workspace_id=ws,
                         id=uuid.UUID(f["id"]),
                         deal_id=record_id,
                         note=f["note"],

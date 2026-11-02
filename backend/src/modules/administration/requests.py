@@ -56,11 +56,19 @@ def _opt_iso(value: Any) -> str | None:
 def _append(ctx: CommandContext, row: AdmRequest, status: str, note: str = "") -> None:
     """改變狀態並追加一筆狀態紀錄；退回時同步更新 processing_note。"""
     last = ctx.db.exec(
-        select(func.max(AdmRequestTransition.seq)).where(AdmRequestTransition.request_id == row.id)
+        select(func.max(AdmRequestTransition.seq)).where(
+            AdmRequestTransition.workspace_id == row.workspace_id,
+            AdmRequestTransition.request_id == row.id,
+        )
     ).one()
     ctx.db.add(
         AdmRequestTransition(
-            request_id=row.id, seq=(last or 0) + 1, status=status, at=ctx.now, note=note
+            workspace_id=row.workspace_id,
+            request_id=row.id,
+            seq=(last or 0) + 1,
+            status=status,
+            at=ctx.now,
+            note=note,
         )
     )
     row.status = status
@@ -95,7 +103,16 @@ def create_request(ctx: CommandContext, payload: dict[str, Any]) -> str | None:
     ctx.db.add(row)
     # 先寫入申請，狀態紀錄的外鍵才有對象
     ctx.db.flush()
-    ctx.db.add(AdmRequestTransition(request_id=row.id, seq=1, status="draft", at=ctx.now, note=""))
+    ctx.db.add(
+        AdmRequestTransition(
+            workspace_id=row.workspace_id,
+            request_id=row.id,
+            seq=1,
+            status="draft",
+            at=ctx.now,
+            note="",
+        )
+    )
     return str(row.id)
 
 

@@ -20,8 +20,8 @@ from src.platform.records import (
     crm_record_missing,
     find_record,
     js_length,
-    parse_id,
     parse_loose_instant,
+    scoped_get,
 )
 
 DRAFT = "draft"
@@ -57,13 +57,18 @@ def all_records(db: Session, workspace_id: str) -> list[CrmRecordRow]:
     return list(db.exec(stmt))
 
 
-def followups_of(db: Session, deal_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[DealFollowupRow]]:
-    """各商機的跟進，依新增順序。"""
+def followups_of(
+    db: Session, workspace_id: str, deal_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[DealFollowupRow]]:
+    """工作區內各商機的跟進，依新增順序。"""
     out: dict[uuid.UUID, list[DealFollowupRow]] = {did: [] for did in deal_ids}
     if deal_ids:
         stmt = (
             select(DealFollowupRow)
-            .where(DealFollowupRow.deal_id.in_(deal_ids))  # type: ignore[attr-defined]
+            .where(
+                DealFollowupRow.workspace_id == uuid.UUID(workspace_id),
+                DealFollowupRow.deal_id.in_(deal_ids),  # type: ignore[attr-defined]
+            )
             .order_by(DealFollowupRow.seq)  # type: ignore[arg-type]
         )
         for f in db.exec(stmt):
@@ -93,9 +98,8 @@ def quote_digest(q: QuoteRow) -> str:
 
 
 def _get_quote(ctx: CommandContext, quote_id: object) -> QuoteRow:
-    parsed = parse_id(quote_id)
-    row = ctx.db.get(QuoteRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id:
+    row = scoped_get(ctx.db, QuoteRow, ctx.workspace_id, quote_id)
+    if row is None:
         raise crm_record_missing()
     return row
 
@@ -114,7 +118,11 @@ def create_followup(ctx: CommandContext, p: dict[str, Any]) -> str:
         "請填追蹤內容",
     )
     assert isinstance(note, str)
-    ctx.db.add(DealFollowupRow(deal_id=deal.id, note=note, created_at=ctx.now))
+    ctx.db.add(
+        DealFollowupRow(
+            workspace_id=deal.workspace_id, deal_id=deal.id, note=note, created_at=ctx.now
+        )
+    )
     ctx.db.flush()
     return str(deal.id)
 

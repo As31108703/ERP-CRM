@@ -13,7 +13,7 @@ from src.modules.services.service import deliveries_of, list_services
 
 def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
     rows = list_services(db, workspace_id)
-    deliveries = deliveries_of(db, [s.id for s in rows])
+    deliveries = deliveries_of(db, workspace_id, [s.id for s in rows])
     services = [
         {
             "id": str(s.id),
@@ -83,6 +83,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         for d in s.get("deliveries", []):
             db.add(
                 ServiceDeliveryRow(
+                    workspace_id=ws,
                     id=uuid.UUID(d["id"]),
                     service_id=service_id,
                     revision=d["revision"],

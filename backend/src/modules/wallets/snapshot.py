@@ -76,6 +76,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         for idx, e in enumerate(row["entries"]):
             db.add(
                 LedgerEntryRow(
+                    workspace_id=ws,
                     ledger_id=ledger_id,
                     idx=idx,
                     wallet_id=uuid.UUID(e["wallet_id"]),
