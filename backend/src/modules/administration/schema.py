@@ -42,6 +42,18 @@ ACTIONS: dict[str, Shape] = {
     "office.reservation.update": shape(("id", "reason"), ("start_at", "end_at", "purpose")),
     "office.reservation.return": shape(("id",)),
     "office.reservation.cancel": shape(("id",)),
+    "office.request.create": shape(
+        ("type", "unit_id", "title"),
+        ("staff_id", "description", "amount_minor", "start_at", "end_at"),
+    ),
+    "office.request.update": shape(
+        ("id",), ("title", "description", "amount_minor", "start_at", "end_at")
+    ),
+    "office.request.submit": shape(("id",)),
+    "office.request.return": shape(("id", "processing_note")),
+    "office.request.withdraw": shape(("id",)),
+    "office.request.prepare": shape(("id",)),
+    "office.demo.create": shape(("preset", "week_start")),
     "office.equipment.create": shape(("code", "name", "unit_id")),
     "office.equipment.update": shape(("id",), ("name", "state")),
     "office.notice.create": shape(("title",), ("body", "unit_id", "pinned", "due_at")),

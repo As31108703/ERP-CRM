@@ -14,7 +14,11 @@
 change 鏈（A§2 validateChanges，422 office_change_invalid）：每筆更正只能改該種類允許的欄位且須有
 實際變更；同一筆資料的更正前後相接；最新一筆與現有資料相符（只差之後仍可變的欄位）。
 
-申請狀態紀錄由 Task 13 補上。
+申請（A§1 Request、A§2 狀態紀錄）：單位存在、員工屬於該單位；請假須有員工與起訖且金額為 0
+（422 office_leave_invalid）；請購與費用金額至少 1；退回須有處理原因；待整理的申請須屬於啟用中的
+單位與員工。狀態紀錄 1–50 筆（422 office_transition_limit），從建立時的草稿開始、時間不倒退且不晚於
+updated_at、每一步符合流程、只有退回帶原因、最後狀態與 processing_note 與紀錄相符
+（422 office_transition_invalid）。
 """
 
 import uuid
@@ -28,15 +32,18 @@ from sqlmodel import Session, select
 
 from src.core import clock
 from src.core.problem import Problem, ensure
+from src.modules.administration import validators as v
 from src.modules.administration.entity import (
     CHANGE_COLLECTIONS,
     CHANGE_LIMIT,
     RECORD_LIMITS,
+    TRANSITION_LIMIT,
     AdmAttendance,
     AdmChange,
     AdmEquipment,
     AdmNotice,
     AdmRequest,
+    AdmRequestTransition,
     AdmReservation,
     AdmShift,
     AdmStaff,
@@ -69,12 +76,17 @@ def _missing() -> Problem:
     return Problem(404, "office_record_missing", "找不到行政紀錄")
 
 
+def counts(db: Session, wid: uuid.UUID) -> dict[str, int]:
+    """各集合（含 changes）目前的筆數；作廢、取消、封存的資料也計入。"""
+    return dict(db.execute(_COUNT_SQL, {"w": wid}).mappings().one())
+
+
 def _check_limits(db: Session, wid: uuid.UUID) -> None:
-    counts = db.execute(_COUNT_SQL, {"w": wid}).mappings().one()
+    counts_ = counts(db, wid)
     for name, limit in RECORD_LIMITS.items():
-        ensure(counts[name] <= limit, 422, "office_record_limit", "行政紀錄超出上限")
+        ensure(counts_[name] <= limit, 422, "office_record_limit", "行政紀錄超出上限")
     ensure(
-        counts["changes"] <= CHANGE_LIMIT, 422, "office_change_limit", "更正與封存紀錄最多 200 筆"
+        counts_["changes"] <= CHANGE_LIMIT, 422, "office_change_limit", "更正與封存紀錄最多 200 筆"
     )
 
 
@@ -176,12 +188,9 @@ def check(db: Session, workspace_id: str) -> None:
     _no_overlap([x for x in shifts if x.status != "cancelled"], lambda x: x.staff_id)
     _no_overlap([x for x in attendance if not x.voided], lambda x: x.staff_id)
 
-    for request in rows(AdmRequest, AdmRequest.status == "submitted"):
-        refs.active_unit(request.unit_id, "待整理的申請須屬於啟用中的單位")
-        if request.staff_id is not None:
-            refs.active_staff(
-                request.staff_id, request.unit_id, "待整理的申請須屬於啟用中的示範員工"
-            )
+    transitions = _transitions(db, wid)
+    for request in rows(AdmRequest):
+        _check_request(request, transitions.get(request.id, []), refs)
 
     equipment_rows = rows(AdmEquipment)
     equipment = {e.id: e for e in equipment_rows}
@@ -217,6 +226,99 @@ def check(db: Session, workspace_id: str) -> None:
         "notices": notices,
     }
     _check_changes(rows(AdmChange), tracked)
+
+
+# --- 申請與狀態紀錄 -----------------------------------------------------------------
+
+# 狀態 → 可轉移到的狀態；returned → draft 只經由編輯
+LIFECYCLE: dict[str, tuple[str, ...]] = {
+    "draft": ("submitted", "withdrawn"),
+    "submitted": ("returned", "withdrawn", "prepared_unreviewed"),
+    "returned": ("draft", "submitted", "withdrawn"),
+    "withdrawn": (),
+    "prepared_unreviewed": (),
+}
+
+
+def _transitions(db: Session, wid: uuid.UUID) -> dict[uuid.UUID, list[AdmRequestTransition]]:
+    stmt = (
+        select(AdmRequestTransition)
+        .join(AdmRequest, AdmRequest.id == AdmRequestTransition.request_id)  # type: ignore[arg-type]
+        .where(AdmRequest.workspace_id == wid)
+        .order_by(AdmRequestTransition.request_id, AdmRequestTransition.seq)  # type: ignore[arg-type]
+    )
+    out: dict[uuid.UUID, list[AdmRequestTransition]] = defaultdict(list)
+    for t in db.exec(stmt):
+        out[t.request_id].append(t)
+    return out
+
+
+def _transition_invalid(message: str) -> Problem:
+    return Problem(422, "office_transition_invalid", message)
+
+
+def _check_history(request: AdmRequest, history: list[AdmRequestTransition]) -> None:
+    """狀態紀錄（A§2 transition-history rules），時間一律以毫秒精度比較。"""
+    ensure(
+        1 <= len(history) <= TRANSITION_LIMIT,
+        422,
+        "office_transition_limit",
+        "每份申請須有狀態紀錄，最多 50 筆",
+    )
+    created, updated = _instant(request.created_at), _instant(request.updated_at)
+    previous_at = created
+    previous_status: str | None = None
+    latest_reason = ""
+    for entry in history:
+        at = _instant(entry.at)
+        if not (previous_at <= at <= updated):
+            raise _transition_invalid("申請狀態紀錄時間不符")
+        if previous_status is None:
+            if not (entry.status == "draft" and at == created):
+                raise _transition_invalid("申請狀態紀錄須從建立時的草稿開始")
+        elif entry.status not in LIFECYCLE.get(previous_status, ()):
+            raise _transition_invalid("申請狀態紀錄流程不符")
+        if entry.status == "returned":
+            latest_reason = v.text(entry.note, 1000)
+        elif entry.note != "":
+            raise _transition_invalid("只有退回紀錄可包含處理原因")
+        previous_at, previous_status = at, entry.status
+    if previous_status != request.status or request.processing_note != latest_reason:
+        raise _transition_invalid("申請狀態或最新退回原因與紀錄不符")
+
+
+def _check_request(request: AdmRequest, history: list[AdmRequestTransition], refs: _Refs) -> None:
+    refs.unit(request.unit_id)
+    if request.staff_id is not None:
+        staff = refs.staff.get(request.staff_id)
+        if staff is None:
+            raise _missing()
+        ensure(
+            staff.unit_id == request.unit_id,
+            422,
+            "office_unit_mismatch",
+            "申請的示範員工與單位不符",
+        )
+    _check_history(request, history)
+    if request.type == "leave":
+        ensure(
+            request.staff_id is not None
+            and request.start_at is not None
+            and request.amount_minor == 0,
+            422,
+            "office_leave_invalid",
+            "請假須指定示範員工與起訖時間，金額須為 0",
+        )
+    if request.type in ("purchase", "expense"):
+        v.integer(request.amount_minor, 1)
+    if request.status == "returned":
+        v.text(request.processing_note, 1000)
+    if request.status == "submitted":
+        refs.active_unit(request.unit_id, "待整理的申請須屬於啟用中的單位")
+        if request.staff_id is not None:
+            refs.active_staff(
+                request.staff_id, request.unit_id, "待整理的申請須屬於啟用中的示範員工"
+            )
 
 
 # --- 時段重疊 -----------------------------------------------------------------------

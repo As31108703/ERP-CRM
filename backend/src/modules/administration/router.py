@@ -11,6 +11,7 @@ from src.modules.administration.attendance import (
     update_attendance,
     void_attendance,
 )
+from src.modules.administration.demo import create_demo
 from src.modules.administration.enable import enable
 from src.modules.administration.equipment import create_equipment, update_equipment
 from src.modules.administration.notices import (
@@ -18,6 +19,14 @@ from src.modules.administration.notices import (
     create_notice,
     restore_notice,
     update_notice,
+)
+from src.modules.administration.requests import (
+    create_request,
+    prepare_request,
+    return_request,
+    submit_request,
+    update_request,
+    withdraw_request,
 )
 from src.modules.administration.reservations import (
     cancel_reservation,
@@ -67,6 +76,13 @@ HANDLERS: dict[str, Callable[[CommandContext, dict[str, Any]], str | None]] = {
     "office.reservation.update": update_reservation,
     "office.reservation.return": return_reservation,
     "office.reservation.cancel": cancel_reservation,
+    "office.request.create": create_request,
+    "office.request.update": update_request,
+    "office.request.submit": submit_request,
+    "office.request.return": return_request,
+    "office.request.withdraw": withdraw_request,
+    "office.request.prepare": prepare_request,
+    "office.demo.create": create_demo,
     "office.equipment.create": create_equipment,
     "office.equipment.update": update_equipment,
     "office.notice.create": create_notice,
@@ -220,6 +236,55 @@ def reservation_cancel(
     row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
 ) -> MutationResponse:
     return _mutate(pipeline, request, raw, "office.reservation.cancel", row_id)
+
+
+@router.post("/demo")
+def demo_create(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.demo.create")
+
+
+@router.post("/requests")
+def request_create(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.create")
+
+
+@router.patch("/requests/{row_id}")
+def request_update(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.update", row_id)
+
+
+@router.post("/requests/{row_id}/submit")
+def request_submit(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.submit", row_id)
+
+
+@router.post("/requests/{row_id}/return")
+def request_return(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.return", row_id)
+
+
+@router.post("/requests/{row_id}/withdraw")
+def request_withdraw(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.withdraw", row_id)
+
+
+@router.post("/requests/{row_id}/prepare")
+def request_prepare(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.request.prepare", row_id)
 
 
 @router.post("/equipment")

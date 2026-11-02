@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
@@ -16,6 +17,7 @@ from sqlalchemy import Engine, create_engine, text
 
 from src.app import create_app
 from src.config.settings import AppConfig, DatabaseConfig, Settings
+from src.core import clock
 from src.core.problem import Problem
 from src.platform.context import CommandContext, HistoryRow
 from src.platform.pipeline import (
@@ -73,6 +75,22 @@ def db_engine() -> Iterator[Engine]:
     engine = create_engine(_sqlalchemy_url(TEST_DATABASE_URL))
     yield engine
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _monotonic_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """系統時鐘可能倒退（WSL 實測約 1.5 秒），測試中讓 utcnow 不倒退，避免時間順序規則誤判。
+
+    測試自己再 monkeypatch `clock.utcnow`（例如固定時間）時，以測試的設定為準。
+    """
+    real = clock.utcnow
+    last = [datetime.min.replace(tzinfo=UTC)]
+
+    def now() -> datetime:
+        last[0] = max(real(), last[0])
+        return last[0]
+
+    monkeypatch.setattr(clock, "utcnow", now)
 
 
 @pytest.fixture(autouse=True)

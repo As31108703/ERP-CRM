@@ -264,7 +264,7 @@ def _parse_row(name: str, row: Any) -> dict[str, Any]:
 
 
 def _parse_transitions(value: Any) -> list[dict[str, Any]]:
-    """狀態紀錄的形狀（1–50 筆、嚴格鍵）。流程規則由 Task 13 的申請驗證負責。"""
+    """狀態紀錄的形狀（1–50 筆、嚴格鍵）；流程規則由 invariants 的申請檢查負責。"""
     ensure(
         isinstance(value, list) and 1 <= len(value) <= TRANSITION_LIMIT,
         422,
