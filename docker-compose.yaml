@@ -22,7 +22,8 @@ services:
     volumes:
       - ./data/postgres:/data/postgres
     ports:
-      - 5436:5432
+      # 只綁本機：給本機開發與測試連線，不對區網開放資料庫
+      - 127.0.0.1:5436:5432
 
   backend:
     <<: *default
@@ -35,7 +36,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - 8000:8000
+      # 只綁本機：方便直接除錯 API；對外一律經由 frontend 的 nginx
+      - 127.0.0.1:8000:8000
 
   # 前端只是 nginx 靜態檔與反向代理，不需要 .env（避免把資料庫帳密帶進容器）
   frontend:

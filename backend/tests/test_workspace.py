@@ -6,10 +6,11 @@ import pytest
 from sqlalchemy import Engine, text
 from sqlmodel import Session
 
+from src.app import create_app
 from src.core import clock
 from src.modules.catalog import seed
 from src.modules.catalog.templates import TEMPLATES
-from src.modules.workspace.retention import purge_expired, run_purge
+from src.modules.workspace.retention import purge_abandoned, purge_expired, run_purge
 from src.platform import registry
 from src.platform.registry import MODULES
 from tests.helpers import ApiClient, new_key
@@ -391,7 +392,7 @@ def test_purge_keeps_recent(api: ApiClient, db_engine: Engine) -> None:
         conn.execute(
             text("UPDATE workspace_session SET last_seen_at = now() - interval '71 hours'")
         )
-    assert run_purge(db_engine, clock.utcnow()) == 0
+    assert run_purge(db_engine, clock.utcnow(), public_demo=True) == 0
     assert _scalar(db_engine, "SELECT count(*) FROM workspace") == 1
 
 
@@ -404,17 +405,115 @@ def test_run_purge_skips_when_locked(api: ApiClient, db_engine: Engine) -> None:
     with db_engine.connect() as holder:
         assert holder.execute(text("SELECT pg_try_advisory_lock(7310)")).scalar_one()
         try:
-            assert run_purge(db_engine, clock.utcnow()) == 0
+            assert run_purge(db_engine, clock.utcnow(), public_demo=True) == 0
         finally:
             holder.execute(text("SELECT pg_advisory_unlock(7310)"))
             holder.commit()
-    assert run_purge(db_engine, clock.utcnow()) == 1
+    assert run_purge(db_engine, clock.utcnow(), public_demo=True) == 1
 
 
-def test_scheduler_only_in_public_demo(make_client) -> None:
-    demo = make_client(public_demo=True)
-    jobs = demo.app.state.scheduler.get_jobs()
+def _insert_session(db_engine: Engine, *, version: int, hours_ago: int) -> str:
+    """直接建立一筆 session（沒有工作區），回傳 id。"""
+    with db_engine.begin() as conn:
+        return str(
+            conn.execute(
+                text(
+                    "INSERT INTO workspace_session (id, token_hash, csrf, version, last_seen_at)"
+                    " VALUES (gen_random_uuid(), md5(random()::text), 'csrf', :version,"
+                    " now() - make_interval(hours => :hours)) RETURNING id"
+                ),
+                {"version": version, "hours": hours_ago},
+            ).scalar_one()
+        )
+
+
+def test_purge_abandoned_sessions(api: ApiClient, db_engine: Engine) -> None:
+    """沒有 cookie 的請求也會建立 session；從未寫入（版本 0、無工作區）且 24 小時沒存取的就清掉。"""
+    stale = _insert_session(db_engine, version=0, hours_ago=25)
+    _insert_session(db_engine, version=0, hours_ago=23)
+    # 清除過工作區的 session 版本已大於 0，保留（自架模式資料永久保留）
+    _insert_session(db_engine, version=2, hours_ago=25)
+    api.setup()
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE workspace_session SET last_seen_at = now() - interval '25 hours'"
+                " WHERE id IN (SELECT session_id FROM workspace)"
+            )
+        )
+    with Session(db_engine) as db:
+        assert purge_abandoned(db, clock.utcnow()) == 1
+        db.commit()
+    ids = _scalar(db_engine, "SELECT array_agg(id::text) FROM workspace_session")
+    assert stale not in ids
+    assert len(ids) == 3
+    assert _scalar(db_engine, "SELECT count(*) FROM workspace") == 1
+
+
+def test_run_purge_private_mode_keeps_workspaces(api: ApiClient, db_engine: Engine) -> None:
+    """自架模式只清從未寫入的 session，72 小時沒存取的工作區仍保留。"""
+    _insert_session(db_engine, version=0, hours_ago=25)
+    api.setup()
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE workspace_session SET last_seen_at = now() - interval '73 hours'")
+        )
+    assert run_purge(db_engine, clock.utcnow(), public_demo=False) == 1
+    assert _scalar(db_engine, "SELECT count(*) FROM workspace") == 1
+    assert _scalar(db_engine, "SELECT count(*) FROM workspace_session") == 1
+    assert run_purge(db_engine, clock.utcnow(), public_demo=True) == 1
+    assert _scalar(db_engine, "SELECT count(*) FROM workspace") == 0
+
+
+@pytest.mark.parametrize("public_demo", [True, False])
+def test_scheduler_runs_in_both_modes(make_client, public_demo: bool) -> None:
+    c = make_client(public_demo=public_demo)
+    jobs = c.app.state.scheduler.get_jobs()
     assert [j.id for j in jobs] == ["retention_purge"]
     assert jobs[0].trigger.interval == timedelta(minutes=10)
-    private = make_client()
-    assert private.app.state.scheduler is None
+    assert jobs[0].kwargs == {"public_demo": public_demo}
+
+
+# --- 啟動時檢查自動建立的預設值 -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"default_industry": "moon"}, "industry_invalid"),
+        ({"default_company": "   "}, "name_invalid"),
+        ({"default_company": "祕密\u0007店"}, "name_invalid"),
+        ({"default_company": "x" * 101}, "name_invalid"),
+        ({"default_modules": []}, "module_invalid"),
+        ({"default_modules": ["moon"]}, "module_invalid"),
+        ({"default_modules": ["sales"]}, "module_dependency"),
+    ],
+)
+def test_invalid_auto_setup_defaults_fail_at_startup(
+    test_settings, overrides: dict, code: str
+) -> None:
+    """APP__AUTO_SETUP=true 時預設值不合法，啟動就失敗，而不是每個第一次 /view 都出錯；
+    錯誤訊息不印出設定值。"""
+    app_config = test_settings.app.model_copy(update={"auto_setup": True, **overrides})
+    settings = test_settings.model_copy(update={"app": app_config})
+    with pytest.raises(ValueError) as err:
+        create_app(settings)
+    message = str(err.value)
+    assert code in message
+    assert "APP__DEFAULT_" in message
+    assert "祕密" not in message and "moon" not in message
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # 沒開 auto_setup，或公開展示模式（auto_setup 一律忽略）時不檢查
+        {"auto_setup": False, "default_industry": "moon"},
+        {"auto_setup": True, "public_demo": True, "default_modules": ["moon"]},
+        # 合法的預設值，公司名稱前後空白會在建立時去掉
+        {"auto_setup": True, "default_industry": "general", "default_company": " 甲 "},
+    ],
+)
+def test_auto_setup_defaults_not_checked_or_valid(test_settings, overrides: dict) -> None:
+    app_config = test_settings.app.model_copy(update=overrides)
+    create_app(test_settings.model_copy(update={"app": app_config}))

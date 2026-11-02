@@ -10,7 +10,8 @@ import json
 import re
 import zipfile
 
-from src.core.problem import ensure
+from src.config.settings import AppConfig
+from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import get_template, resolve_modules
 from src.modules.workspace.service import NAME_MAX
 
@@ -18,9 +19,14 @@ LAUNCH_KIT_FILENAME = "erpcrm-launch-kit.zip"
 _CONTROL_RE = re.compile(r"[\u0000-\u001f\u007f-\u009f]")
 # zip 內檔案的固定時間，讓同樣的設定產生相同內容
 _ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+# 與 docker-compose.yaml 的 ${FRONTEND_PORT:-8080} 相同
+DEFAULT_FRONTEND_PORT = 8080
 
 
-def normalize(industry: str | None, company_name: str | None, modules: str | None) -> dict:
+def normalize_config(
+    industry: str | None, company_name: str | None, modules: list[str] | None
+) -> dict:
+    """檢查並正規化產業、公司名稱與模組清單（None 表示用範本預設）；不合法時拋出 422 Problem。"""
     template = get_template(industry)
     name = company_name.strip() if isinstance(company_name, str) else ""
     ensure(
@@ -29,13 +35,32 @@ def normalize(industry: str | None, company_name: str | None, modules: str | Non
         "name_invalid",
         "請填店名（1 到 100 字，不含控制字元）",
     )
-    selected = None if modules is None else modules.split(",")
-    ensure(selected is None or selected != [""], 422, "module_invalid", "請至少啟用一個模組")
+    ensure(modules is None or len(modules) > 0, 422, "module_invalid", "請至少啟用一個模組")
     return {
         "industry": template.id,
         "company_name": name,
-        "modules": resolve_modules(template.id, selected),
+        "modules": resolve_modules(template.id, modules),
     }
+
+
+def normalize(industry: str | None, company_name: str | None, modules: str | None) -> dict:
+    """啟動包查詢參數版本：modules 為逗號分隔字串，空字串表示一個模組都沒選。"""
+    selected = None if modules is None else modules.split(",") if modules else []
+    return normalize_config(industry, company_name, selected)
+
+
+def check_auto_setup_defaults(app: AppConfig) -> None:
+    """啟動時檢查：自架模式開啟 auto_setup 時，`APP__DEFAULT_*` 必須通過與啟動包相同的規則，
+    否則每個新 session 的第一次檢視都會失敗。訊息只帶錯誤碼與固定說明，不印出設定值。"""
+    if not app.auto_setup or app.public_demo:
+        return
+    try:
+        normalize_config(app.default_industry, app.default_company, app.default_modules)
+    except Problem as problem:
+        raise ValueError(
+            "APP__AUTO_SETUP=true 時，APP__DEFAULT_INDUSTRY／APP__DEFAULT_COMPANY／"
+            f"APP__DEFAULT_MODULES 設定無效：{problem.message}（{problem.code}）"
+        ) from None
 
 
 def _env_value(value: str) -> str:
@@ -65,6 +90,9 @@ def _env(config: dict) -> str:
         f"APP__DEFAULT_INDUSTRY={config['industry']}",
         f"APP__DEFAULT_COMPANY={_env_value(config['company_name'])}",
         f"APP__DEFAULT_MODULES={modules}",
+        "",
+        "# 前端對外連接埠（docker compose 用；8080 被占用時改成其他值，例如 18080）",
+        f"FRONTEND_PORT={DEFAULT_FRONTEND_PORT}",
         "",
     ]
     return "\n".join(lines)
@@ -99,7 +127,13 @@ def _readme(config: dict) -> str:
             "   根目錄已有 .env 時會被覆蓋，請先備份。",
             "2. 確認已安裝並啟動 Docker（需支援 docker compose）。",
             "3. macOS／Linux 執行 ./start.sh；Windows 執行 start.cmd。",
-            "4. 啟動完成後用瀏覽器開啟前端網址，第一次開啟會自動以上述設定建立模擬工作區。",
+            f"4. 啟動完成後用瀏覽器開啟 http://localhost:{DEFAULT_FRONTEND_PORT}"
+            "，第一次開啟會自動以上述設定建立模擬工作區。",
+            f"   {DEFAULT_FRONTEND_PORT} 埠被占用時，先把 .env 的 FRONTEND_PORT 改成其他值再啟動。",
+            "",
+            "注意：資料庫只在 ./data/postgres 第一次建立時設定密碼，之後一律沿用原本的密碼。",
+            "如果原本的 .env 改過 DATABASE__PASSWORD，請把同一個值填回新的 .env，",
+            "否則後端會連不上資料庫。原本自訂過 FRONTEND_PORT 的話也請一併保留。",
             "",
             "所有金額都是 SIM 模擬幣，不連接任何真實金流。",
             "",

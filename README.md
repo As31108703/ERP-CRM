@@ -10,7 +10,7 @@
 - **不是會計或稅務系統**：沒有真實稅額、發票、會計科目或財務報表。「模擬報表」只是依工作區紀錄即時計算的練習數字。錢包流水採雙分錄，總和恆為 0，用來練習核對，不能當作帳務依據。
 - **行政工作台只用合成資料**：排班、出勤、申請與設備借用都只是練習，不能當作薪資、准假、採購或付款的依據。
 - **沒有帳號與權限**：每個瀏覽器以 `erpcrm_session` cookie（HttpOnly、SameSite=Strict）對應一個工作區。沒有登入、角色或權限控管。清除 cookie 或換一個瀏覽器，就會拿到新的空白工作區。
-- **資料保留**：公開試用模式（`APP__PUBLIC_DEMO=true`）下，工作區 72 小時沒有存取就會整筆自動刪除。後端每 10 分鐘清理一次，cookie 的 Max-Age 為 259200 秒。自架模式（預設）的資料永久保留，cookie 的 Max-Age 為 31536000 秒（365 天）。
+- **資料保留**：公開試用模式（`APP__PUBLIC_DEMO=true`）下，工作區 72 小時沒有存取就會整筆自動刪除。後端每 10 分鐘清理一次，cookie 的 Max-Age 為 259200 秒。自架模式（預設）的資料永久保留，cookie 的 Max-Age 為 31536000 秒（365 天）。兩種模式都會清掉從未寫入（版本 0、沒有工作區）且 24 小時沒有存取的 session。
 - **筆數與大小上限**：
   - 每個集合（商品、訂單、客戶等）最多 500 筆，超過時回 `record_limit`。操作歷史不計入這個上限。
   - 每筆命令的明細（`lines`）為 1 到 50 行；客戶等 CRM 紀錄的文字內容合計最多 4000 字。
@@ -97,24 +97,29 @@
 ┌─────────────────────────────────────────┐
 │ backend（FastAPI，uvicorn :8000）       │
 │  middleware：錯誤格式、session cookie   │
-│  platform：命令管線                     │
-│    CSRF → Origin → 速率限制 → 冪等收據  │
-│    → 版本鎖 → 模組閘 → 前置檢查         │
-│    → 模組 handler → 一致性檢查 → 歷史   │
+│  platform：命令管線（寫入請求）         │
+│    速率限制 → Origin → CSRF → 冪等鍵    │
+│    → 版本標頭 → body 上限 → JSON        │
+│    → 重播 → 版本鎖 → 收據上限 → 工作區  │
+│    → 模組閘 → handler → 一致性檢查      │
+│    → 版本 +1 → 歷史 → 收據              │
 │  modules：inventory sales wallets crm   │
 │    services projects manufacturing      │
 │    administration learning backup       │
 │    reports workbench workspace catalog  │
-│  APScheduler：公開試用時每 10 分鐘清理  │
+│  APScheduler：每 10 分鐘清理 session    │
 └─────────────────────────────────────────┘
                  │  psycopg 3／SQLAlchemy 2
                  ▼
 ┌─────────────────────────────────────────┐
 │ db（postgres:16-alpine）                │
-│  資料在 ./data/postgres，主機埠 5436    │
+│  資料在 ./data/postgres                 │
+│  主機埠 127.0.0.1:5436                  │
 │  schema 由 goose migration 管理         │
 └─────────────────────────────────────────┘
 ```
+
+每個寫入請求先鎖住所屬 session 列，再依序經過命令管線（`backend/src/platform/pipeline.py`）：速率限制 → Origin → CSRF → `Idempotency-Key` 格式 → `If-Match-Version` 格式 → body 大小上限 → JSON 解析 → 同一識別的重播 → 版本鎖 → 收據上限 → 工作區是否存在 → 模組閘 → 模組 handler → 一致性檢查 → 版本號 +1 → 寫入 history → 寫入收據。速率計數在 SAVEPOINT 之外先寫入；之後任何一步失敗都只回滾 SAVEPOINT，業務資料、版本號、history 與收據完全不變。
 
 待辦、提示、搜尋、教學證據、報表與 CSV 等衍生資料都由後端計算，前端只負責呈現，並透過型別化的 API client 呼叫後端。
 
@@ -171,7 +176,9 @@ curl http://localhost:8080/api/health
 # {"name":"erpcrm","version":"0.1.0","simulation":true,"real_finance":false,"currency":"SIM"}
 ```
 
-對外的連接埠：前端 8080、後端 API 8000、PostgreSQL 5436。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
+連接埠：前端 8080 對所有網路介面開放；後端 API 8000 與 PostgreSQL 5436 只綁 `127.0.0.1`，供本機除錯與測試使用，區網其他機器連不到，對外一律經由前端的 nginx。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
+
+要在前面再加一層 HTTPS 反向代理時，請讓它設定 `X-Forwarded-Proto` 與 `X-Forwarded-Host`。前端 nginx 會原樣轉給後端（標頭不存在時才用自己的 scheme 與 Host），後端據此比對寫入請求的 Origin，並在 https 下替 cookie 加上 `Secure`。前端頁面另帶 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY` 與 `Content-Security-Policy: frame-ancestors 'none'`。
 
 ## 環境變數
 
@@ -191,14 +198,15 @@ curl http://localhost:8080/api/health
 | `APP__DEFAULT_COMPANY` | （未列） | `星軌示範商店` | 預設公司名稱。只在自架模式下預先填入建置精靈 |
 | `APP__DEFAULT_MODULES` | （未列） | 未設定 | 預設啟用的模組，JSON 陣列。未設定時沿用範本的推薦模組 |
 
-後三項通常由本機啟動包寫入。
+後三項通常由本機啟動包寫入。自架模式開啟 `APP__AUTO_SETUP` 時，後端啟動會以啟動包相同的規則檢查這三項（產業須為已知範本、公司名稱 1 到 100 字且不含控制字元、模組非空且相依齊全），不合法就直接啟動失敗，日誌只列出錯誤原因，不印出設定值。
 
 ## 公開試用與自架模式
 
 | 項目 | 公開試用（`APP__PUBLIC_DEMO=true`） | 自架（`APP__PUBLIC_DEMO=false`，預設） |
 | --- | --- | --- |
 | 資料保留 | 72 小時沒有存取就整筆刪除，持續使用會自動延後 | 永久保留 |
-| 自動清理 | 啟動 APScheduler，每 10 分鐘清理一次；多個實例時以 advisory lock 確保只有一個執行 | 不啟動 |
+| 自動清理 | 每 10 分鐘清理：72 小時沒有存取的工作區，以及從未寫入且 24 小時沒有存取的 session | 每 10 分鐘只清理從未寫入（版本 0、沒有工作區）且 24 小時沒有存取的 session |
+| 清理排程 | APScheduler；多個實例時以 advisory lock 確保只有一個執行 | 同左 |
 | cookie Max-Age | 259200（72 小時） | 31536000（365 天） |
 | `APP__AUTO_SETUP` | 一律忽略，每位訪客都從建置精靈開始 | 可開啟：第一次進站就以 `APP__DEFAULT_*` 自動建立工作區 |
 | 建置精靈的公司名稱 | 不預填 | 預填 `APP__DEFAULT_COMPANY` |
@@ -208,11 +216,13 @@ curl http://localhost:8080/api/health
 
 在建置精靈第 3 步選「下載本機啟動包」，或在自訂建置頁下載，會呼叫 `GET /api/v1/backup/launch-kit`，取得 `erpcrm-launch-kit.zip`。內容如下：
 
-- `.env`：自架模式，`APP__AUTO_SETUP=true`，並帶入所選的產業、公司名稱與模組。
+- `.env`：自架模式，`APP__AUTO_SETUP=true`，並帶入所選的產業、公司名稱與模組；資料庫帳密為 `erpcrm`，`FRONTEND_PORT=8080`。
 - `start.sh`、`start.cmd`：執行 `docker compose up -d --build`。
 - `README.txt`：使用步驟。
 
 把這四個檔案解壓縮到專案根目錄（與 `docker-compose.yaml` 同一層；原有的 `.env` 會被覆蓋），執行 `./start.sh`（Windows 用 `start.cmd`），再開啟 <http://localhost:8080>。第一次進站就會依設定自動建立工作區。
+
+PostgreSQL 只在 `./data/postgres` 第一次建立時設定密碼，之後一律沿用。原本的 `.env` 若改過 `DATABASE__PASSWORD`（或 `FRONTEND_PORT`），請把同樣的值填回新的 `.env`，否則後端會連不上資料庫。啟動包的 `README.txt` 也有同樣的提醒。
 
 ## 本機開發
 
