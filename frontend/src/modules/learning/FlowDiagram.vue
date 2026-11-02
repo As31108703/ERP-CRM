@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { LearningFact, LearningPathId } from "../../api/types";
+import type { LearningFact } from "../../api/types";
 import { nodeFact, nodeGlyph, nodeLabel } from "./learning";
 
 /**
@@ -8,7 +8,6 @@ import { nodeFact, nodeGlyph, nodeLabel } from "./learning";
  * `still` 為真（暫停或系統要求減少動態）時完全靜止。
  */
 const props = defineProps<{
-  path: LearningPathId;
   title: string;
   nodes: string[];
   facts: LearningFact[];
@@ -20,8 +19,8 @@ const items = computed(() =>
   props.nodes.map((node, i) => ({
     key: `${node}-${i}`,
     glyph: nodeGlyph(node),
-    label: nodeLabel(props.path, props.nodes, i),
-    fact: nodeFact(props.path, props.nodes, i, props.facts),
+    label: nodeLabel(node),
+    fact: nodeFact(node, props.facts),
     current: i === props.current,
   })),
 );
@@ -31,7 +30,7 @@ const items = computed(() =>
   <div class="flow" :class="{ 'is-still': still }" data-testid="learning-diagram" role="group" :aria-label="`${title}流程示意`">
     <div class="flow__beam" aria-hidden="true"><span /></div>
     <ol class="flow__nodes" :style="{ '--n': items.length }">
-      <li v-for="(n, i) in items" :key="n.key" class="flow__node" :class="{ 'is-current': n.current }" :style="{ '--i': i }">
+      <li v-for="(n, i) in items" :key="n.key" class="flow__node" :data-node="nodes[i]" :class="{ 'is-current': n.current }" :style="{ '--i': i }">
         <span class="flow__glyph" aria-hidden="true">{{ n.glyph }}</span>
         <strong class="flow__label">{{ n.label }}</strong>
         <span class="flow__fact">{{ n.fact }}</span>

@@ -139,8 +139,8 @@ export interface FirstRunRoute {
 export interface FirstRun {
   progress: FirstRunItem[];
   route: FirstRunRoute | null;
-  /** 正規化後為布林值；後端回的是可用教學路線數。 */
-  learning_available?: boolean;
+  /** 可用的教學路線數；0 代表沒有。 */
+  learning_available?: number;
 }
 
 /** 寫入命令的一般回應：`result` 為新紀錄 id 或 null，其餘為 view 欄位。 */
@@ -154,10 +154,11 @@ export interface MutationResult extends Partial<WorkspaceView> {
 export type LearningPathId = "sales" | "manufacturing" | "service";
 export type LearningScope = "lesson" | "workspace";
 
-/** 讀值；label 可能帶「 · 名稱」，配對時取「 ·」之前。 */
+/** 讀值；node 為所屬的流程示意圖節點 id（對應 `path.nodes`），不屬於任何節點時為 null。 */
 export interface LearningFact {
   label: string;
   value: string;
+  node: string | null;
 }
 
 export interface LearningCheckpoint {
@@ -198,7 +199,7 @@ export interface LearningEvaluation {
 export interface LearningSnapshot {
   version: number;
   result: string;
-  rows: { label: string; before: string; after: string }[];
+  rows: { label: string; before: string; after: string; node: string | null }[];
 }
 
 export interface LearningStepDef {

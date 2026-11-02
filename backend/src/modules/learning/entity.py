@@ -46,5 +46,5 @@ class LearningCheckpointRow(SQLModel, table=True):
     payload: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     result: str
     version: int = Field(sa_type=BigInteger)
-    before: list[dict[str, str]] = Field(sa_column=Column(JSONB, nullable=False))
-    after: list[dict[str, str]] = Field(sa_column=Column(JSONB, nullable=False))
+    before: list[dict[str, str | None]] = Field(sa_column=Column(JSONB, nullable=False))
+    after: list[dict[str, str | None]] = Field(sa_column=Column(JSONB, nullable=False))

@@ -39,8 +39,7 @@ function normalize(raw: unknown): FirstRun | null {
   return {
     progress: Array.isArray(r.progress) ? r.progress.filter(isItem) : [],
     route: isRoute(r.route) ? r.route : null,
-    // 後端回可用教學路線數（0 代表沒有）；舊格式的布林值照舊接受
-    learning_available: typeof r.learning_available === "number" ? r.learning_available > 0 : r.learning_available !== false,
+    learning_available: typeof r.learning_available === "number" ? r.learning_available : undefined,
   };
 }
 
@@ -75,7 +74,11 @@ const current = computed(() => {
   return i < 0 ? progress.value.length : i;
 });
 const route = computed(() => data.value?.route ?? null);
-const learning = computed(() => data.value?.learning_available !== false);
+/** 讀不到上手進度時入口照常顯示；有數字時只在可用路線數 > 0 時顯示。 */
+const learning = computed(() => {
+  const count = data.value?.learning_available;
+  return count === undefined || count > 0;
+});
 
 async function show(visible: boolean): Promise<void> {
   ui.setFirstRunHidden(!visible);

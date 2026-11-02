@@ -381,7 +381,6 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.("change", onMotion));
         </div>
         <FlowDiagram
           class="studio__diagram"
-          :path="detail.path.id"
           :title="detail.path.title"
           :nodes="detail.path.nodes"
           :facts="facts"

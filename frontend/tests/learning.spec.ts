@@ -22,7 +22,7 @@ const NODES: Record<string, string> = {
   "fund-buyer": "wallet",
   order: "order",
   pay: "order",
-  ship: "inventory",
+  ship: "shipment",
 };
 
 function pathDef() {
@@ -34,7 +34,7 @@ function pathDef() {
     headline: "把一筆訂單，走到出貨。",
     intro: "先備好商品和測試幣。",
     outcome: "你會看見：付款不會移動庫存。",
-    nodes: ["wallet", "inventory", "order", "inventory"],
+    nodes: ["wallet", "inventory", "order", "shipment"],
     steps: STEP_IDS.map((id, i) => ({
       id,
       action: "customer.create",
@@ -76,7 +76,19 @@ function detail(view: { paused?: boolean; selected_step?: string | null } = {}) 
       complete: false,
     },
     preview: { text: "商家錢包增加 100.00 SIM，留下補幣流水。", blocked_reason: null },
-    facts: { lesson: [{ label: "本輪顧客", value: "1" }], workspace: [{ label: "工作區顧客", value: "4" }] },
+    facts: {
+      lesson: [
+        { label: "本輪顧客", value: "1 位", node: null },
+        { label: "本輪訂單", value: "0 筆", node: "order" },
+        { label: "本輪已出貨", value: "0 件", node: "shipment" },
+        { label: "共用商品現有量 · 星塵咖啡豆", value: "5 件", node: "inventory" },
+        { label: "本輪買家測試幣", value: "0.00 SIM", node: "wallet" },
+      ],
+      workspace: [
+        { label: "工作區顧客", value: "4 位", node: null },
+        { label: "工作區已出貨", value: "3 件", node: "shipment" },
+      ],
+    },
     snapshots: {},
   };
 }
@@ -199,5 +211,27 @@ describe("learning studio commands", () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain("先啟用一條完整工作流程"));
     expect(wrapper.text()).toContain("查看模組設定");
     expect(wrapper.find("[data-testid=learning-execute]").exists()).toBe(false);
+  });
+});
+
+describe("learning flow diagram", () => {
+  it("shows each node's fact by its node key and highlights the current step's node", async () => {
+    const { wrapper, fetchMock } = await mountStudio(detail());
+    const node = (id: string) => wrapper.get(`[data-testid=learning-diagram] [data-node="${id}"]`);
+    expect(node("shipment").text()).toContain("出貨與成本");
+    expect(node("shipment").text()).toContain("本輪已出貨 0 件");
+    expect(node("inventory").text()).toContain("共用商品現有量 · 星塵咖啡豆 5 件");
+    expect(node("wallet").text()).toContain("本輪買家測試幣");
+    // 下一步 fund-business 的節點是 wallet
+    expect(node("wallet").classes()).toContain("is-current");
+    expect(node("shipment").classes()).not.toContain("is-current");
+
+    const scoped = detail();
+    scoped.session.scope = "workspace";
+    fetchMock.mockImplementationOnce(async () => json(200, scoped));
+    await wrapper.get("[data-testid=learning-scope-workspace]").trigger("click");
+    await flush();
+    expect(node("shipment").text()).toContain("工作區已出貨 3 件");
+    expect(node("order").text()).toContain("本輪尚無對應紀錄");
   });
 });

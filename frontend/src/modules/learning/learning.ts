@@ -43,27 +43,25 @@ export const PATH_REQUIREMENTS = [
   "材料製造：需要商品庫存、製造與測試幣。",
 ] as const;
 
-/** 流程示意圖節點的顯示名稱與符號。 */
-const NODE_COPY: Record<string, { label: string; glyph: string }> = {
+/**
+ * 流程示意圖節點的顯示名稱、符號與沒有讀值時的說明（以後端 `path.nodes` 的 id 為鍵）。
+ * 未列出的 id 直接顯示 id。
+ */
+const NODE_COPY: Record<string, { label: string; glyph: string; idle?: string }> = {
   wallet: { label: "測試幣", glyph: "S" },
   inventory: { label: "商品與材料", glyph: "▤" },
   order: { label: "訂單", glyph: "≡" },
-  bom: { label: "物料清單", glyph: "⌘" },
+  shipment: { label: "出貨與成本", glyph: "⇥" },
+  bom: { label: "物料清單", glyph: "⌘", idle: "沿用範本 BOM，版本由工單凍結" },
   production: { label: "製造工單", glyph: "◇" },
+  finished: { label: "成品入庫", glyph: "▣" },
   case: { label: "客戶案件", glyph: "↗" },
   quote: { label: "報價版本", glyph: "≋" },
   service: { label: "服務確認", glyph: "◎" },
   delivery: { label: "交付與驗收", glyph: "✓" },
 };
 
-/** 同名節點出現第二次時（庫存），代表流程終點。 */
-function isClosingNode(nodes: readonly string[], index: number): boolean {
-  return nodes.indexOf(nodes[index]) !== index;
-}
-
-export function nodeLabel(path: LearningPathId, nodes: readonly string[], index: number): string {
-  const node = nodes[index];
-  if (node === "inventory" && isClosingNode(nodes, index)) return path === "manufacturing" ? "成品入庫" : "出貨與成本";
+export function nodeLabel(node: string): string {
   return NODE_COPY[node]?.label ?? node;
 }
 
@@ -71,52 +69,17 @@ export function nodeGlyph(node: string): string {
   return NODE_COPY[node]?.glyph ?? "•";
 }
 
-const baseLabel = (fact: LearningFact) => fact.label.split(" ·")[0];
-
-/** 節點對應的讀值名稱結尾。 */
-function wantedFact(path: LearningPathId, nodes: readonly string[], index: number): string {
-  const node = nodes[index];
-  if (node === "wallet") return path === "sales" ? "買家測試幣" : "商家測試幣";
-  if (node === "inventory") {
-    if (!isClosingNode(nodes, index)) return "現有量";
-    return path === "manufacturing" ? "成品現有量" : "已出貨";
-  }
-  const map: Record<string, string> = {
-    order: "訂單",
-    case: "案件",
-    quote: "報價",
-    service: "已驗收服務",
-    delivery: "交付版本",
-    bom: "BOM 版本",
-    production: "工單",
-  };
-  return map[node] ?? node;
-}
-
-/** 節點下方顯示的讀值（找不到時給說明文字）。 */
-export function nodeFact(path: LearningPathId, nodes: readonly string[], index: number, facts: readonly LearningFact[]): string {
-  const wanted = wantedFact(path, nodes, index);
-  const fact = facts.find((f) => baseLabel(f).endsWith(wanted));
+/** 節點下方顯示的讀值：取後端標為這個節點的第一列（找不到時給說明文字）。 */
+export function nodeFact(node: string, facts: readonly LearningFact[]): string {
+  const fact = facts.find((f) => f.node === node);
   if (fact) return `${fact.label} ${fact.value}`;
-  if (nodes[index] === "bom") return "沿用範本 BOM，版本由工單凍結";
-  return "本輪尚無對應紀錄";
+  return NODE_COPY[node]?.idle ?? "本輪尚無對應紀錄";
 }
 
-/**
- * 目前步驟對應的節點索引：同名節點出現兩次時，該節點在路線上的最後一步
- * 落在終點那一個，其他步驟落在第一個。沒有對應節點時回傳 -1。
- */
+/** 目前步驟對應的節點索引（後端保證節點 id 不重複）；步驟不在示意圖上時回傳 -1。 */
 export function currentNodeIndex(detail: LearningDetail, stepIndex: number): number {
-  const steps = detail.path.steps;
-  const step = steps[stepIndex];
-  if (!step) return -1;
-  const nodes = detail.path.nodes;
-  const first = nodes.indexOf(step.node);
-  if (first < 0) return -1;
-  const last = nodes.lastIndexOf(step.node);
-  if (last === first) return first;
-  const lastStepWithNode = steps.map((s) => s.node).lastIndexOf(step.node);
-  return stepIndex === lastStepWithNode ? last : first;
+  const step = detail.path.steps[stepIndex];
+  return step ? detail.path.nodes.indexOf(step.node) : -1;
 }
 
 /** 閱讀位置：有選取的章節就用它，否則停在下一個實作步驟。 */
