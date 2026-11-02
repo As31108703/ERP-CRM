@@ -6,6 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from src.modules.administration import invariants, snapshot
+from src.modules.administration.attendance import (
+    create_attendance,
+    update_attendance,
+    void_attendance,
+)
 from src.modules.administration.enable import enable
 from src.modules.administration.equipment import create_equipment, update_equipment
 from src.modules.administration.notices import (
@@ -13,6 +18,19 @@ from src.modules.administration.notices import (
     create_notice,
     restore_notice,
     update_notice,
+)
+from src.modules.administration.reservations import (
+    cancel_reservation,
+    create_reservation,
+    return_reservation,
+    update_reservation,
+)
+from src.modules.administration.shifts import (
+    cancel_shift,
+    complete_shift,
+    copy_week,
+    create_shift,
+    update_shift,
 )
 from src.modules.administration.staff import create_staff, update_staff
 from src.modules.administration.units import create_unit, update_unit
@@ -37,6 +55,18 @@ HANDLERS: dict[str, Callable[[CommandContext, dict[str, Any]], str | None]] = {
     "office.unit.update": update_unit,
     "office.staff.create": create_staff,
     "office.staff.update": update_staff,
+    "office.shift.create": create_shift,
+    "office.shift.update": update_shift,
+    "office.shift.cancel": cancel_shift,
+    "office.shift.complete": complete_shift,
+    "office.shift.copy_week": copy_week,
+    "office.attendance.create": create_attendance,
+    "office.attendance.update": update_attendance,
+    "office.attendance.void": void_attendance,
+    "office.reservation.create": create_reservation,
+    "office.reservation.update": update_reservation,
+    "office.reservation.return": return_reservation,
+    "office.reservation.cancel": cancel_reservation,
     "office.equipment.create": create_equipment,
     "office.equipment.update": update_equipment,
     "office.notice.create": create_notice,
@@ -106,6 +136,90 @@ def staff_update(
     row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
 ) -> MutationResponse:
     return _mutate(pipeline, request, raw, "office.staff.update", row_id)
+
+
+@router.post("/shifts")
+def shift_create(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.shift.create")
+
+
+@router.post("/shifts/copy-week")
+def shift_copy_week(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.shift.copy_week")
+
+
+@router.patch("/shifts/{row_id}")
+def shift_update(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.shift.update", row_id)
+
+
+@router.post("/shifts/{row_id}/cancel")
+def shift_cancel(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.shift.cancel", row_id)
+
+
+@router.post("/shifts/{row_id}/complete")
+def shift_complete(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.shift.complete", row_id)
+
+
+@router.post("/attendance")
+def attendance_create(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.attendance.create")
+
+
+@router.patch("/attendance/{row_id}")
+def attendance_update(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.attendance.update", row_id)
+
+
+@router.post("/attendance/{row_id}/void")
+def attendance_void(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.attendance.void", row_id)
+
+
+@router.post("/reservations")
+def reservation_create(
+    request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.reservation.create")
+
+
+@router.patch("/reservations/{row_id}")
+def reservation_update(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.reservation.update", row_id)
+
+
+@router.post("/reservations/{row_id}/return")
+def reservation_return(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.reservation.return", row_id)
+
+
+@router.post("/reservations/{row_id}/cancel")
+def reservation_cancel(
+    row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+) -> MutationResponse:
+    return _mutate(pipeline, request, raw, "office.reservation.cancel", row_id)
 
 
 @router.post("/equipment")

@@ -22,6 +22,26 @@ ACTIONS: dict[str, Shape] = {
     "office.unit.update": shape(("id",), ("name", "active")),
     "office.staff.create": shape(("code", "alias", "unit_id"), ("role_label",)),
     "office.staff.update": shape(("id",), ("alias", "role_label", "status")),
+    "office.shift.create": shape(
+        ("staff_id", "unit_id", "start_at", "end_at"), ("break_minutes", "note")
+    ),
+    "office.shift.update": shape(("id", "reason"), ("start_at", "end_at", "break_minutes", "note")),
+    "office.shift.cancel": shape(("id",)),
+    "office.shift.complete": shape(("id",)),
+    "office.shift.copy_week": shape(("from_date", "to_date")),
+    "office.attendance.create": shape(
+        ("staff_id", "unit_id", "start_at", "end_at"), ("break_minutes", "note")
+    ),
+    "office.attendance.update": shape(
+        ("id", "reason"), ("start_at", "end_at", "break_minutes", "note")
+    ),
+    "office.attendance.void": shape(("id", "reason")),
+    "office.reservation.create": shape(
+        ("equipment_id", "staff_id", "start_at", "end_at"), ("purpose",)
+    ),
+    "office.reservation.update": shape(("id", "reason"), ("start_at", "end_at", "purpose")),
+    "office.reservation.return": shape(("id",)),
+    "office.reservation.cancel": shape(("id",)),
     "office.equipment.create": shape(("code", "name", "unit_id")),
     "office.equipment.update": shape(("id",), ("name", "state")),
     "office.notice.create": shape(("title",), ("body", "unit_id", "pinned", "due_at")),
