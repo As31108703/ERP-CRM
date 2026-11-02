@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, hasInjectionContext, ref, watch } from "vue";
 import { useRouter, type Router } from "vue-router";
-import type { RoleViewId, TargetRef } from "../api/types";
+import type { RoleViewId, TargetRef, WorkspaceView } from "../api/types";
 import { findRow, isRecordKind, modulePath, moduleOfKind, RECORD_KINDS, targetLocation } from "../lib/records";
 import { safeSession } from "../lib/storage";
 import { useWorkspaceStore } from "./workspace";
@@ -89,17 +89,27 @@ export const useUiStore = defineStore("ui", () => {
     }
   }
 
-  /** 仍然有效的釘選：種類已知、模組正確且啟用、紀錄仍存在。 */
+  /** 釘選指向的模組目前啟用、種類已知且模組對應正確（紀錄是否存在另外判斷）。 */
+  function pinModuleActive(p: TargetRef, modules: readonly string[]): boolean {
+    return isRecordKind(p.kind) && p.module === moduleOfKind(p.kind, modules) && modules.includes(p.module);
+  }
+
+  function pinVisible(p: TargetRef, ws: NonNullable<WorkspaceView["workspace"]>): boolean {
+    return (
+      pinModuleActive(p, ws.modules) &&
+      isRecordKind(p.kind) &&
+      findRow(ws, RECORD_KINDS[p.kind].collection, p.id) !== undefined
+    );
+  }
+
+  /**
+   * 仍然有效的釘選：種類已知、模組正確且啟用、紀錄仍存在。
+   * 只是「顯示」時過濾；存檔保留全部，模組重新啟用後隱藏的釘選會再出現。
+   */
   const pins = computed(() => {
     const ws = workspace.view?.workspace;
     if (!ws) return [];
-    return raw.value.filter(
-      (p) =>
-        isRecordKind(p.kind) &&
-        p.module === moduleOfKind(p.kind, ws.modules) &&
-        ws.modules.includes(p.module) &&
-        findRow(ws, RECORD_KINDS[p.kind].collection, p.id) !== undefined,
-    );
+    return raw.value.filter((p) => pinVisible(p, ws));
   });
 
   function isPinned(kind: string, id: string): boolean {
@@ -111,15 +121,33 @@ export const useUiStore = defineStore("ui", () => {
     if (generation.value) safeSession.set(pinsKey(generation.value), JSON.stringify(next));
   }
 
-  /** 切換釘選；達上限時回傳提示訊息，成功回傳 null。 */
+  /**
+   * 切換釘選：只新增或移除這一筆，其他已存的釘選（包含被模組停用或紀錄不存在而隱藏的）一律保留。
+   * 上限以畫面上看得到的釘選計算；達上限時回傳提示訊息，成功回傳 null。
+   * 儲存最多 PIN_LIMIT 筆：新增時若已滿，才依序捨棄紀錄已刪除（模組仍啟用）的釘選、最舊的隱藏釘選來騰出空間，
+   * 看得到的釘選不會被捨棄。
+   */
   function togglePin(target: TargetRef): string | null {
-    const current = pins.value;
-    if (current.some((p) => p.kind === target.kind && p.id === target.id)) {
-      savePins(current.filter((p) => !(p.kind === target.kind && p.id === target.id)));
+    const same = (p: TargetRef) => p.kind === target.kind && p.id === target.id;
+    if (raw.value.some(same)) {
+      savePins(raw.value.filter((p) => !same(p)));
       return null;
     }
-    if (current.length >= PIN_LIMIT) return PIN_LIMIT_MESSAGE;
-    savePins([...current, { module: target.module, kind: target.kind, id: target.id }]);
+    if (pins.value.length >= PIN_LIMIT) return PIN_LIMIT_MESSAGE;
+    const next = [...raw.value, { module: target.module, kind: target.kind, id: target.id }];
+    const ws = workspace.view?.workspace;
+    if (ws && next.length > PIN_LIMIT) {
+      const visible = new Set(pins.value);
+      const added = next[next.length - 1];
+      const hidden = (p: TargetRef) => p !== added && !visible.has(p);
+      while (next.length > PIN_LIMIT) {
+        const deleted = next.findIndex((p) => hidden(p) && pinModuleActive(p, ws.modules));
+        const i = deleted >= 0 ? deleted : next.findIndex(hidden);
+        if (i < 0) break;
+        next.splice(i, 1);
+      }
+    }
+    savePins(next);
     return null;
   }
 
