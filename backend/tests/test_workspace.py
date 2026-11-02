@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import Engine, text
 from sqlmodel import Session
 
+from src.app import create_app
 from src.core import clock
 from src.modules.catalog import seed
 from src.modules.catalog.templates import TEMPLATES
@@ -471,3 +472,48 @@ def test_scheduler_runs_in_both_modes(make_client, public_demo: bool) -> None:
     assert [j.id for j in jobs] == ["retention_purge"]
     assert jobs[0].trigger.interval == timedelta(minutes=10)
     assert jobs[0].kwargs == {"public_demo": public_demo}
+
+
+# --- 啟動時檢查自動建立的預設值 -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"default_industry": "moon"}, "industry_invalid"),
+        ({"default_company": "   "}, "name_invalid"),
+        ({"default_company": "祕密\u0007店"}, "name_invalid"),
+        ({"default_company": "x" * 101}, "name_invalid"),
+        ({"default_modules": []}, "module_invalid"),
+        ({"default_modules": ["moon"]}, "module_invalid"),
+        ({"default_modules": ["sales"]}, "module_dependency"),
+    ],
+)
+def test_invalid_auto_setup_defaults_fail_at_startup(
+    test_settings, overrides: dict, code: str
+) -> None:
+    """APP__AUTO_SETUP=true 時預設值不合法，啟動就失敗，而不是每個第一次 /view 都出錯；
+    錯誤訊息不印出設定值。"""
+    app_config = test_settings.app.model_copy(update={"auto_setup": True, **overrides})
+    settings = test_settings.model_copy(update={"app": app_config})
+    with pytest.raises(ValueError) as err:
+        create_app(settings)
+    message = str(err.value)
+    assert code in message
+    assert "APP__DEFAULT_" in message
+    assert "祕密" not in message and "moon" not in message
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # 沒開 auto_setup，或公開展示模式（auto_setup 一律忽略）時不檢查
+        {"auto_setup": False, "default_industry": "moon"},
+        {"auto_setup": True, "public_demo": True, "default_modules": ["moon"]},
+        # 合法的預設值，公司名稱前後空白會在建立時去掉
+        {"auto_setup": True, "default_industry": "general", "default_company": " 甲 "},
+    ],
+)
+def test_auto_setup_defaults_not_checked_or_valid(test_settings, overrides: dict) -> None:
+    app_config = test_settings.app.model_copy(update=overrides)
+    create_app(test_settings.model_copy(update={"app": app_config}))

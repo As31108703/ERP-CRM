@@ -9,6 +9,7 @@ from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
 from src.modules.administration.router import router as administration_router
+from src.modules.backup.launch_kit import check_auto_setup_defaults
 from src.modules.backup.router import router as backup_router
 from src.modules.catalog.router import router as catalog_router
 from src.modules.crm.router import router as crm_router
@@ -65,6 +66,8 @@ ROUTERS: list[APIRouter] = [
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    # 自動建立工作區的預設值不合法時直接啟動失敗，不要等到每個新 session 才出錯
+    check_auto_setup_defaults(settings.app)
     # 引擎採延遲連線，建立 app 時不會連資料庫
     engine = make_engine(settings)
 

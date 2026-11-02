@@ -10,7 +10,8 @@ import json
 import re
 import zipfile
 
-from src.core.problem import ensure
+from src.config.settings import AppConfig
+from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import get_template, resolve_modules
 from src.modules.workspace.service import NAME_MAX
 
@@ -22,7 +23,10 @@ _ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 DEFAULT_FRONTEND_PORT = 8080
 
 
-def normalize(industry: str | None, company_name: str | None, modules: str | None) -> dict:
+def normalize_config(
+    industry: str | None, company_name: str | None, modules: list[str] | None
+) -> dict:
+    """檢查並正規化產業、公司名稱與模組清單（None 表示用範本預設）；不合法時拋出 422 Problem。"""
     template = get_template(industry)
     name = company_name.strip() if isinstance(company_name, str) else ""
     ensure(
@@ -31,13 +35,32 @@ def normalize(industry: str | None, company_name: str | None, modules: str | Non
         "name_invalid",
         "請填店名（1 到 100 字，不含控制字元）",
     )
-    selected = None if modules is None else modules.split(",")
-    ensure(selected is None or selected != [""], 422, "module_invalid", "請至少啟用一個模組")
+    ensure(modules is None or len(modules) > 0, 422, "module_invalid", "請至少啟用一個模組")
     return {
         "industry": template.id,
         "company_name": name,
-        "modules": resolve_modules(template.id, selected),
+        "modules": resolve_modules(template.id, modules),
     }
+
+
+def normalize(industry: str | None, company_name: str | None, modules: str | None) -> dict:
+    """啟動包查詢參數版本：modules 為逗號分隔字串，空字串表示一個模組都沒選。"""
+    selected = None if modules is None else modules.split(",") if modules else []
+    return normalize_config(industry, company_name, selected)
+
+
+def check_auto_setup_defaults(app: AppConfig) -> None:
+    """啟動時檢查：自架模式開啟 auto_setup 時，`APP__DEFAULT_*` 必須通過與啟動包相同的規則，
+    否則每個新 session 的第一次檢視都會失敗。訊息只帶錯誤碼與固定說明，不印出設定值。"""
+    if not app.auto_setup or app.public_demo:
+        return
+    try:
+        normalize_config(app.default_industry, app.default_company, app.default_modules)
+    except Problem as problem:
+        raise ValueError(
+            "APP__AUTO_SETUP=true 時，APP__DEFAULT_INDUSTRY／APP__DEFAULT_COMPANY／"
+            f"APP__DEFAULT_MODULES 設定無效：{problem.message}（{problem.code}）"
+        ) from None
 
 
 def _env_value(value: str) -> str:
