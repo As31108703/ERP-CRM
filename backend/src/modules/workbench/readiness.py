@@ -21,13 +21,14 @@ class _Blockers:
         self.items.append({"message": message, "target": to if self.w.valid(to) else self.own})
 
 
+NOT_IN_WORKSPACE = "這筆紀錄不在目前啟用的工作區。"
+
+
 def readiness(w: World, kind: str, row_id: str) -> Readiness:
     own = w.target(kind, row_id)
-    if not w.valid(own):
-        return {"summary": "這筆紀錄不在目前啟用的工作區。", "blockers": []}
-    row = w.find(kind, row_id)
-    if row is None:  # valid(own) 已確認紀錄存在；保險起見與不在工作區同樣處理
-        return {"summary": "這筆紀錄不在目前啟用的工作區。", "blockers": []}
+    row = w.find(kind, row_id) if w.valid(own) else None
+    if row is None:
+        return {"summary": NOT_IN_WORKSPACE, "blockers": []}
     blockers = _Blockers(w, own)
     summary = _SUMMARIES.get(kind, _other)(w, kind, row, blockers)
     return {"summary": summary, "blockers": blockers.items}

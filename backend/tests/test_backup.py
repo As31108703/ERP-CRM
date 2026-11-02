@@ -171,11 +171,8 @@ def _demo_world_with_crm(api: ApiClient) -> dict[str, str]:
     api.ok("POST", f"{SERVICES}/{service}/confirm", {})
     api.ok("POST", f"{SERVICES}/{service}/deliver", {"artifact_ref": "v1"})
     ws = api.snapshot()
-    delivery = next(s for s in ws["services"] if s["id"] == service)["deliveries"][0]
     return {
         "product": next(p for p in ws["products"] if p["sku"] == "T-001")["id"],
-        "delivery": delivery["id"],
-        "delivery_digest": delivery["digest"],
         "buyer": _wallet(ws, "buyer")["id"],
         "order": ws["orders"][0]["id"],
         "case": case,
@@ -241,6 +238,27 @@ def test_import_same_backup_into_two_sessions(api: ApiClient, make_client) -> No
     assert _without_generation(third.snapshot()) == _without_generation(imported)
 
 
+def test_review_delivery_lookup_is_workspace_scoped(api: ApiClient, make_client) -> None:
+    """B 匯入 A 的備份後服務 id 相同；A 之後交付的新版本只存在 A 的工作區。
+    B 對共用的服務 id 帶 A 的新 delivery_id 驗收：交付查詢以工作區為範圍，回 404。
+    （若查詢不分工作區，會找到 service_id 相同的交付而往下處理。）"""
+    ids = _demo_world_with_crm(api)
+    other = ApiClient(make_client())
+    assert _import(other, _export(api)).status_code == 200
+    api.ok("POST", f"{SERVICES}/{ids['service']}/deliver", {"artifact_ref": "v2"})
+    service = next(s for s in api.snapshot()["services"] if s["id"] == ids["service"])
+    newest = service["deliveries"][-1]
+    assert newest["id"] == service["latest_delivery_id"] and newest["revision"] == 2
+    before = other.snapshot()
+    r = other.mutate(
+        "POST",
+        f"{SERVICES}/{ids['service']}/accept",
+        {"delivery_id": newest["id"], "digest": newest["digest"]},
+    )
+    assert _error(r) == (404, "simulation_record_missing")
+    assert other.snapshot() == before
+
+
 def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> None:
     """其他工作區的 id 一律視為不存在（404），不會 500，也不會讀到或改到其他工作區的資料。
     每個以 id 取得紀錄的共用查詢至少各測一個命令。"""
@@ -251,7 +269,6 @@ def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> No
     own = other.snapshot()
     own_buyer = _wallet(own, "buyer")["id"]
     own_product = own["products"][0]["id"]
-    own_service = own["services"][0]["id"]
 
     order_body = {
         "buyer_wallet_id": own_buyer,
@@ -281,13 +298,6 @@ def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> No
         ("POST", f"{QUOTES}/{ids['quote']}/issue", {}, "record_missing"),
         # services.get_service
         ("POST", f"{SERVICES}/{ids['service']}/confirm", {}, "simulation_record_missing"),
-        # services._review 的交付查詢：自己的服務帶其他工作區的 delivery_id
-        (
-            "POST",
-            f"{SERVICES}/{own_service}/accept",
-            {"delivery_id": ids["delivery"], "digest": ids["delivery_digest"]},
-            "simulation_record_missing",
-        ),
         # manufacturing 的商品、BOM、工單
         ("POST", BOMS, bom_body, "record_missing"),
         ("POST", WORK_ORDERS, {"bom_id": ids["bom"], "quantity": 1}, "record_missing"),
@@ -727,3 +737,20 @@ def test_record_ids_walks_declared_paths(monkeypatch: pytest.MonkeyPatch) -> Non
     assert sorted(registry.record_ids(collections)) == ["i1", "i2", "n1", "r1", "r2"]
     # 缺少的鍵或型別不符時略過，交給各模組的結構檢查回正式錯誤碼
     assert list(registry.record_ids({"rows": "bad", "nested": None})) == []
+
+
+def test_import_id_collision_precedes_admin_field_errors(api: ApiClient) -> None:
+    """損壞的備份同時有識別碼重複與行政欄位錯誤時，先回 id_collision：識別碼檢查在
+    各模組 restore（行政欄位驗證）之前統一執行。"""
+    backup = _with_admin(api)
+    before = api.snapshot()
+    bad = copy.deepcopy(backup)
+    unit = bad["collections"]["administration"]["units"][0]
+    unit["id"] = bad["collections"]["products"][0]["id"]
+    unit["extra_field"] = 1
+    assert _error(_import(api, bad)) == (422, "id_collision")
+    # 只有欄位錯誤時才回欄位錯誤碼
+    fields_only = copy.deepcopy(backup)
+    fields_only["collections"]["administration"]["units"][0]["extra_field"] = 1
+    assert _error(_import(api, fields_only)) == (422, "office_fields_invalid")
+    assert api.snapshot() == before

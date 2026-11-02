@@ -120,7 +120,7 @@
 └─────────────────────────────────────────┘
 ```
 
-每個寫入請求先鎖住所屬 session 列，再依序經過命令管線（`backend/src/platform/pipeline.py`）：速率限制 → Origin → CSRF → `Idempotency-Key` 格式 → `If-Match-Version` 格式 → body 大小上限 → JSON 解析 → 同一識別的重播 → 版本鎖 → 收據上限 → 工作區是否存在 → 模組閘 → 模組 handler → 一致性檢查 → 版本號 +1 → 寫入 history → 寫入收據。速率計數在 SAVEPOINT 之外先寫入；之後任何一步失敗都只回滾 SAVEPOINT，業務資料、版本號、history 與收據完全不變。
+每個寫入請求先鎖住所屬 session 列，再依序經過命令管線（`backend/src/platform/pipeline.py`）：速率限制 → Origin → CSRF → `Idempotency-Key` 格式 → `If-Match-Version` 格式 → body 大小上限 → JSON 解析 → 同一識別的重播 → 版本鎖 → 收據上限 → 工作區是否存在 → 模組閘 → 模組 handler → 版本號 +1 → 寫入 history → 一致性檢查（各模組檢查，最後是預留量與工作區大小的最終檢查）→ 寫入收據。速率計數在 SAVEPOINT 之外先寫入；之後任何一步失敗都只回滾 SAVEPOINT，業務資料、版本號、history 與收據完全不變。
 
 待辦、提示、搜尋、教學證據、報表與 CSV 等衍生資料都由後端計算，前端只負責呈現，並透過型別化的 API client 呼叫後端。
 
