@@ -573,3 +573,142 @@ def test_all_specs_order_independent_of_import(monkeypatch, names):
         "projects",
         "administration",
     )
+
+
+def test_final_invariants_run_after_all_module_invariants(api, db_engine, monkeypatch):
+    """最終檢查在所有模組的 invariants 之後依 FINAL_ORDER 執行，與登錄先後無關；
+    檢查時版本號已加 1、本次 history 已寫入（與參考系統先記錄再驗證的順序一致）。"""
+    calls: list[str] = []
+
+    def record(name: str):
+        def check(db, workspace_id: str) -> None:
+            assert workspace_id
+            calls.append(name)
+
+        return check
+
+    def versioned(db, workspace_id: str) -> None:
+        version = db.execute(text("SELECT version FROM workspace_session")).scalar_one()
+        history = db.execute(text("SELECT count(*) FROM history")).scalar_one()
+        calls.append(f"version={version},history={history}")
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    monkeypatch.setattr(registry, "_FINALS", {})
+    monkeypatch.setattr(registry, "FINAL_ORDER", ("second", "first", "last"))
+    registry.register_final("last", versioned)
+    registry.register_final("first", record("final-first"))
+    registry.register_final("second", record("final-second"))
+    registry.register_final("extra", record("final-extra"))
+    for name in ("zeta", "inventory"):
+        registry.register(
+            registry.ModuleSpec(
+                name,
+                lambda _d, _w: {},
+                lambda _d, _w, _x: None,
+                invariants=(record(name),),
+            )
+        )
+    api.state()
+    _seed_workspace(db_engine)
+    assert api.mutate("POST", "/api/v1/_test/command", {}).status_code == 200
+    assert calls == [
+        "inventory",
+        "zeta",
+        "final-second",
+        "final-first",
+        "version=1,history=1",
+        "final-extra",
+    ]
+
+
+def test_final_invariant_failure_rolls_back(api, db_engine, monkeypatch):
+    def broken(_db, _workspace_id: str) -> None:
+        raise Problem(422, "invariant_failed", "測試一致性錯誤")
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    monkeypatch.setattr(registry, "_FINALS", {})
+    registry.register_final("broken", broken)
+    api.state()
+    _seed_workspace(db_engine)
+    assert _error(api.mutate("POST", "/api/v1/_test/command", {})) == (422, "invariant_failed")
+    assert api.state()["version"] == 0
+    assert _scalar(db_engine, "SELECT count(*) FROM history") == 0
+    assert _scalar(db_engine, "SELECT count(*) FROM receipt") == 0
+
+
+def test_final_order_constant():
+    assert registry.FINAL_ORDER == ("reservations", "workspace_limit")
+    assert set(registry._FINALS) == {"reservations", "workspace_limit"}
+
+
+# --- GET 讀取的一致性 -------------------------------------------------------------
+
+
+_READ_PATHS = ["/api/v1/workspace/view", "/api/v1/backup/export"]
+
+
+def _concurrent_rename(db_engine) -> None:
+    """模擬並行命令提交：改名並把 session 版本號加 1。"""
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE workspace SET company_name = '途中改名'"))
+        conn.execute(text("UPDATE workspace_session SET version = version + 1"))
+
+
+def _read_name_version(body: dict, path: str) -> tuple[str, int, int]:
+    """回應中的店名、外層版本號（view 的 body.version；export 沒有外層，取 meta）與快照版本號。"""
+    if path.endswith("/view"):
+        return body["workspace"]["company_name"], body["version"], body["workspace"]["version"]
+    meta = body["workspace"]
+    return meta["company_name"], meta["version"], meta["version"]
+
+
+@pytest.mark.parametrize("path", _READ_PATHS)
+def test_get_reads_one_snapshot(api, db_engine, monkeypatch, path):
+    """GET 讀取途中有其他交易提交（含版本號），同一次讀取的版本號與資料都停在讀取開始時。"""
+    api.setup("general")
+    version = api.state()["version"]
+
+    def first(db, workspace_id: str) -> dict:
+        name = db.execute(
+            text("SELECT company_name FROM workspace WHERE id = :id"), {"id": workspace_id}
+        ).scalar_one()
+        _concurrent_rename(db_engine)
+        return {"first": name}
+
+    def second(db, workspace_id: str) -> dict:
+        name = db.execute(
+            text("SELECT company_name FROM workspace WHERE id = :id"), {"id": workspace_id}
+        ).scalar_one()
+        return {"second": name}
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    registry.register(registry.ModuleSpec("inventory", first, lambda _d, _w, _x: None))
+    registry.register(registry.ModuleSpec("wallets", second, lambda _d, _w, _x: None))
+    r = api.get(path)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    world = body["workspace"] if path.endswith("/view") else body["collections"]
+    assert world["first"] == world["second"] == "測試公司"
+    assert _read_name_version(body, path) == ("測試公司", version, version)
+
+
+@pytest.mark.parametrize("path", _READ_PATHS)
+def test_get_version_matches_data_after_touch_commit(api, db_engine, monkeypatch, path):
+    """速率計數提交之後、一致讀取交易開始之前有命令提交：回應的版本號與資料必須一致
+    （session 列在讀取交易內重新讀取），不會出現新資料配舊版本號。"""
+    api.setup("general")
+    version = api.state()["version"]
+    original = pipeline.begin_consistent_read
+    fired: list[bool] = []
+
+    def racing(db, row) -> None:
+        if not fired:
+            fired.append(True)
+            _concurrent_rename(db_engine)
+        original(db, row)
+
+    monkeypatch.setattr(pipeline, "begin_consistent_read", racing)
+    r = api.get(path)
+    assert r.status_code == 200, r.text
+    assert fired
+    assert _read_name_version(r.json(), path) == ("途中改名", version + 1, version + 1)

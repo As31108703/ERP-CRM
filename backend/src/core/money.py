@@ -20,3 +20,10 @@ def check_int(
     if isinstance(n, bool) or not isinstance(n, int) or not (min_ <= n <= INT_MAX):
         raise Problem(422, code, message)
     return n
+
+
+def format_sim(minor: int) -> str:
+    """`1,234.50 SIM`（100 minor = 1 SIM）；負數前面加負號。"""
+    sign = "-" if minor < 0 else ""
+    whole, cents = divmod(abs(minor), 100)
+    return f"{sign}{whole:,}.{cents:02d} SIM"

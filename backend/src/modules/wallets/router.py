@@ -20,6 +20,7 @@ SPEC = registry.ModuleSpec(
     snapshot=snapshot.snapshot,
     restore=snapshot.restore,
     invariants=(invariants.check_wallets,),
+    id_paths=("wallets", "ledger"),
 )
 registry.register(SPEC)
 register_seeder(MODULE, service.seed_wallets, order=SEED_WALLETS)

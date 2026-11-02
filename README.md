@@ -16,6 +16,7 @@
   - 每筆命令的明細（`lines`）為 1 到 50 行；客戶等 CRM 紀錄的文字內容合計最多 4000 字。
   - 每個工作區每分鐘最多 120 個請求，GET 也計入，超過時回 429 `rate_limit` 並附 `Retry-After`。
   - 一般寫入的 body 上限 32,768 bytes，備份匯入上限 3 MiB。
+  - 整個工作區（含操作歷史）序列化成 JSON 後最多 1,000,000 個字元，超過時命令與匯入都回 422 `workspace_limit`。這個上限保證合法工作區匯出的備份一定能在 3 MiB 內匯入。
   - 冪等收據最多 500 筆。超過時只允許建立、清除與匯入三種操作，這三種操作會把收據修剪到最近 100 筆。
 - **禁止輸入真實金融資訊**：欄位名稱含 bank、payer、finance、legal、payment_url 的資料一律拒收（`simulation_required`）。
 
@@ -119,7 +120,7 @@
 └─────────────────────────────────────────┘
 ```
 
-每個寫入請求先鎖住所屬 session 列，再依序經過命令管線（`backend/src/platform/pipeline.py`）：速率限制 → Origin → CSRF → `Idempotency-Key` 格式 → `If-Match-Version` 格式 → body 大小上限 → JSON 解析 → 同一識別的重播 → 版本鎖 → 收據上限 → 工作區是否存在 → 模組閘 → 模組 handler → 一致性檢查 → 版本號 +1 → 寫入 history → 寫入收據。速率計數在 SAVEPOINT 之外先寫入；之後任何一步失敗都只回滾 SAVEPOINT，業務資料、版本號、history 與收據完全不變。
+每個寫入請求先鎖住所屬 session 列，再依序經過命令管線（`backend/src/platform/pipeline.py`）：速率限制 → Origin → CSRF → `Idempotency-Key` 格式 → `If-Match-Version` 格式 → body 大小上限 → JSON 解析 → 同一識別的重播 → 版本鎖 → 收據上限 → 工作區是否存在 → 模組閘 → 模組 handler → 版本號 +1 → 寫入 history → 一致性檢查（各模組檢查，最後是預留量與工作區大小的最終檢查）→ 寫入收據。速率計數在 SAVEPOINT 之外先寫入；之後任何一步失敗都只回滾 SAVEPOINT，業務資料、版本號、history 與收據完全不變。
 
 待辦、提示、搜尋、教學證據、報表與 CSV 等衍生資料都由後端計算，前端只負責呈現，並透過型別化的 API client 呼叫後端。
 

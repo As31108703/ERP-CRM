@@ -822,23 +822,12 @@ def test_snapshot_restore_roundtrip(api: ApiClient, db_engine: Engine) -> None:
     assert _adm(api) == data
 
 
-def test_restore_rejects_id_collision_and_schema(api: ApiClient, db_engine: Engine) -> None:
+def test_restore_rejects_schema(api: ApiClient, db_engine: Engine) -> None:
+    """識別碼重複由備份匯入統一檢查（見 test_backup 的 id_collision 測試）。"""
     _setup_admin(api)
     workspace_id = _ws_id(db_engine)
     unit = str(uuid.uuid4())
     data = _full_admin(unit, str(uuid.uuid4()), str(uuid.uuid4()))
-    dup = copy.deepcopy(data)
-    dup["notices"][0]["id"] = unit.upper()
-    with Session(db_engine) as db:
-        assert _code(adm_snapshot.restore, db, workspace_id, {"administration": dup}) == (
-            "id_collision"
-        )
-        db.rollback()
-    # 與其他集合的識別重複
-    other = {"administration": copy.deepcopy(data), "customers": [{"id": unit}]}
-    with Session(db_engine) as db:
-        assert _code(adm_snapshot.restore, db, workspace_id, other) == "id_collision"
-        db.rollback()
     extra = copy.deepcopy(data)
     extra["units"][0]["checker_id"] = unit
     with Session(db_engine) as db:

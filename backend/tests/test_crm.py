@@ -85,7 +85,12 @@ def test_seed_crm(api: ApiClient, industry: str) -> None:
     }
     assert ws["contacts"] == []
     assert ws["quotes"] == []
-    # 任務與里程碑由 projects 的 seed 建立（見 test_projects.py）
+    # 任務與里程碑由 projects 的 seed 建立（見 test_projects.py）；
+    # 沒有 projects 的範本（retail）不建立
+    if "projects" not in TEMPLATES[industry].modules:
+        assert ws["tasks"] == [] and ws["milestones"] == []
+    else:
+        assert len(ws["tasks"]) == 1 and len(ws["milestones"]) == 1
     assert len(ws["history"]) == 0
 
 

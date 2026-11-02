@@ -15,7 +15,7 @@ CREATE TABLE bom (
 
 CREATE INDEX bom_workspace_seq_idx ON bom (workspace_id, seq);
 
--- BOM 材料：idx 為材料在 BOM 中的順序（1..30 筆）
+-- BOM 材料：idx 為材料在 BOM 中的順序，從 0 起算（最多 30 筆，即 0..29）
 CREATE TABLE bom_component (
     workspace_id UUID NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
     bom_id UUID NOT NULL,

@@ -23,11 +23,13 @@ SPEC = registry.ModuleSpec(
     restore=snapshot.restore,
     invariants=(
         invariants.check_orders,
-        invariants.check_reservations,
         invariants.check_stock_value,
     ),
+    id_paths=("orders", "orders.lines"),
 )
 registry.register(SPEC)
+# 預留量加總訂單與工單的需求，等所有模組（含製造的工單 BOM 複本）檢查過才執行
+registry.register_final("reservations", invariants.check_reservations)
 
 router = APIRouter(prefix="/api/v1/sales")
 Pipeline = Depends(get_pipeline)

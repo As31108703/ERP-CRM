@@ -117,8 +117,23 @@ def _settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+def begin_consistent_read(db: Session, row: WorkspaceSessionRow) -> None:
+    """在 db 目前沒有交易時，以 REPEATABLE READ 開始下一個交易，並在交易內重新讀取 session 列。
+
+    GET 的讀取分成多個查詢（各模組快照、報表、工作台）；預設的 READ COMMITTED 每個查詢各自
+    取快照，並行命令在讀取途中提交就會讀到前後不一致的資料。REPEATABLE READ 讓整次讀取
+    共用第一個查詢時的快照，也不會擋住命令寫入。交易結束後連線歸還連線池時隔離等級會還原。
+
+    session 列（版本號、csrf）是在前一個交易鎖住讀取的，提交後到這裡之間可能有命令提交；
+    refresh 是交易內的第一個查詢，版本號因此與之後讀到的業務資料出自同一份快照。
+    `db.get(WorkspaceSessionRow, …)` 取得的是同一個物件，也會看到更新後的值。"""
+    db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    db.refresh(row)
+
+
 def touch_session(request: Request) -> Iterator[CommandContext]:
-    """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，再交出唯讀用的 context。"""
+    """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，
+    再以單一 REPEATABLE READ 交易交出唯讀用的 context。"""
     with Session(request.app.state.engine, expire_on_commit=False) as db:
         try:
             row = lock_session(db, session_token(request), clock.utcnow())
@@ -129,6 +144,7 @@ def touch_session(request: Request) -> Iterator[CommandContext]:
         except BaseException:
             db.rollback()
             raise
+        begin_consistent_read(db, row)
         yield CommandContext(
             db=db,
             session_row=row,
@@ -366,11 +382,9 @@ class CommandPipeline:
         db.flush()
         # handler 可能建立或刪除工作區（setup、clear、import），以資料庫現況為準
         ctx.workspace = load_workspace(db, row.id)
-        # 17：一致性檢查
-        invariants.check_all(ctx)
-        # 18：版本號
+        # 17：版本號
         row.version += 1
-        # 19：history 只記業務命令（setup、clear、import 不記）
+        # 18：history 只記業務命令（setup、clear、import 不記）
         if needs_workspace and ctx.workspace is not None:
             db.add(
                 HistoryRow(
@@ -381,6 +395,9 @@ class CommandPipeline:
                     created_at=now,
                 )
             )
+        # 19：一致性檢查在版本號與 history 寫入之後，檢查的是命令完成後的完整工作區
+        # （工作區大小含新的 history 與版本號）；失敗時兩者隨 SAVEPOINT 一起回滾
+        invariants.check_all(ctx)
         # 20：收據；已達上限時，可修剪的操作先修剪到最近 100 筆
         if prunes_receipts and receipts.count(db, row.id) >= RECEIPT_CAP:
             receipts.prune(db, row.id)

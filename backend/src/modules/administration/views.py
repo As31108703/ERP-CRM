@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from src.core import clock
+from src.core.money import format_sim
 from src.core.problem import ensure
 from src.modules.administration import snapshot
 from src.modules.administration import validators as v
@@ -114,13 +115,6 @@ def net_minutes(row: Mapping[str, Any]) -> int:
     return max(0, (ms + 30_000) // 60_000 - row["break_minutes"])
 
 
-def format_sim(minor: int) -> str:
-    """`1,234.50 SIM`；金額為非負整數 minor（100 minor = 1 SIM）。"""
-    sign = "-" if minor < 0 else ""
-    whole, cents = divmod(abs(minor), 100)
-    return f"{sign}{whole:,}.{cents:02d} SIM"
-
-
 # --- 資料 -----------------------------------------------------------------------------
 
 
@@ -179,9 +173,8 @@ class Desk:
 
 def load(ctx: CommandContext) -> Desk:
     """讀取前的閘：沒有工作區 409、未啟用行政模組 403，與寫入命令一致。"""
-    ensure(ctx.workspace is not None, 409, "workspace_missing", "請先建立工作區")
-    assert ctx.workspace is not None
-    ensure(snapshot.MODULE in ctx.workspace.modules, 403, "module_disabled", "模組未啟用")
+    workspace = ctx.require_workspace()
+    ensure(snapshot.MODULE in workspace.modules, 403, "module_disabled", "模組未啟用")
     return Desk(snapshot.administration(ctx.db, ctx.workspace_id))
 
 
@@ -334,7 +327,8 @@ def filter_rows(desk: Desk, p: ViewParams) -> list[dict[str, Any]]:
             and status_is(r["status"])
         ]
         return _sorted(rows, "start_at", reverse=True)
-    # notices：全體公告不受單位篩選影響；發布中的置頂公告在前，其餘依更新時間由新到舊
+    # notices：全體公告（unit_id 為 null）不受單位篩選影響；發布中的置頂公告排在前面，
+    # 兩組內各自依更新時間由新到舊（穩定排序保留先前的時間順序）
     rows = [
         r
         for r in desk["notices"]
@@ -453,6 +447,8 @@ PEOPLE_REASON = "先新增使用中組織與假員工。"
 
 
 def onboarding(desk: Desk) -> dict[str, Any]:
+    """入門路線三步：使用中組織、使用中組織內的使用中假員工、任一未取消班次（不限週次）。
+    前一步未完成時，下一步的 reason 說明原因；三步都完成後 open 為 false。"""
     has_unit = bool(desk.active_unit_ids)
     has_staff = bool(desk.active_staff())
     steps = [
@@ -501,6 +497,8 @@ def onboarding(desk: Desk) -> dict[str, Any]:
 
 
 def overview(desk: Desk, now: datetime, week: str, unit: str | None) -> dict[str, Any]:
+    """待辦概覽四格：待整理與待補件申請、目前可用設備、選定週出勤差異人數（依 unit 篩選）、
+    最近一則尚未截止的發布中公告；另附入門路線與各分頁筆數。"""
     requests = desk["requests"]
     submitted = sum(1 for r in requests if r["status"] == "submitted")
     returned = sum(1 for r in requests if r["status"] == "returned")

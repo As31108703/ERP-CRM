@@ -1,4 +1,5 @@
-"""命令執行後的整體一致性檢查：依序執行各模組註冊的 invariants。"""
+"""命令執行後的整體一致性檢查：依 SPEC_ORDER 執行各模組註冊的 invariants，
+再依 FINAL_ORDER 執行最終檢查（跨模組預留量、工作區大小）。"""
 
 from src.platform import registry
 from src.platform.context import CommandContext
@@ -14,3 +15,5 @@ def check_all(ctx: CommandContext) -> None:
     for spec in registry.all_specs():
         for check in spec.invariants:
             check(ctx.db, workspace_id)
+    for check in registry.final_invariants():
+        check(ctx.db, workspace_id)

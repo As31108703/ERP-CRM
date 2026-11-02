@@ -39,7 +39,8 @@ def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
             "latest_delivery_id": (
                 str(s.latest_delivery_id) if s.latest_delivery_id is not None else None
             ),
-            "legal_confirmation": False,
+            # 一致性檢查保證為 false；輸出資料列的實際值，竄改時才看得出來
+            "legal_confirmation": s.legal_confirmation,
             "created_at": clock.iso(s.created_at),
             "updated_at": clock.iso(s.updated_at),
         }

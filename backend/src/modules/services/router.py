@@ -24,6 +24,7 @@ SPEC = registry.ModuleSpec(
     snapshot=snapshot.snapshot,
     restore=snapshot.restore,
     invariants=(invariants.check_services,),
+    id_paths=("services", "services.deliveries"),
 )
 registry.register(SPEC)
 register_seeder(MODULE, service.seed_services, order=SEED_SERVICES)

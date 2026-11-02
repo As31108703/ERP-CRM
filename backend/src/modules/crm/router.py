@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, Request
 
 from src.modules.catalog.seed import SEED_CRM, register_seeder
 from src.modules.crm import invariants, service, snapshot
+from src.modules.crm import records as crm_records
 from src.platform import records, registry
 from src.platform.context import CommandContext
 from src.platform.pipeline import CommandPipeline, MutationResponse, get_pipeline, raw_body
-from src.platform.records import Handler
+from src.platform.records import RECORD_COLLECTIONS, Handler
 
 MODULE = "crm"
 
@@ -21,7 +22,7 @@ COLLECTIONS: dict[str, str] = {
 
 
 def _generic(action: str, collection: str) -> Handler:
-    fn = records.generic_create if action.endswith(".create") else records.generic_update
+    fn = crm_records.generic_create if action.endswith(".create") else crm_records.generic_update
 
     def handler(ctx: CommandContext, p: dict) -> str:
         return fn(ctx, collection, p)
@@ -51,6 +52,8 @@ SPEC = registry.ModuleSpec(
         invariants.check_deals,
         invariants.check_quotes,
     ),
+    # 通用紀錄（含 projects 的 tasks、milestones）由 crm 的快照輸出
+    id_paths=(*RECORD_COLLECTIONS, "deals.followups", "quotes"),
 )
 registry.register(SPEC)
 register_seeder(MODULE, service.seed_crm, order=SEED_CRM)

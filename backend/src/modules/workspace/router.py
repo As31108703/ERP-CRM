@@ -7,17 +7,21 @@ from fastapi import APIRouter, Depends, Request
 from src.core.problem import Problem
 from src.middleware.session import session_token
 from src.modules.workspace import service
-from src.platform import invariants, receipts
+from src.platform import invariants, receipts, registry
 from src.platform.context import CommandContext
 from src.platform.pipeline import (
     CommandPipeline,
     MutationResponse,
+    begin_consistent_read,
     get_pipeline,
     load_workspace,
     lock_session,
     raw_body,
     touch_session,
 )
+
+# 工作區大小在所有一致性檢查的最後（B§2 validateWorld 的最後一項）
+registry.register_final("workspace_limit", service.check_workspace_limit)
 
 router = APIRouter(prefix="/api/v1/workspace")
 Pipeline = Depends(get_pipeline)
@@ -26,7 +30,11 @@ Touch = Depends(touch_session)
 
 
 def _auto_setup(request: Request, ctx: CommandContext) -> None:
-    """在鎖住 session 列的交易內再確認一次，避免並行的第一次檢視重複建立。"""
+    """在鎖住 session 列的交易內再確認一次，避免並行的第一次檢視重複建立。
+
+    touch_session 交出的是 REPEATABLE READ 的讀取交易；鎖與寫入要看到並行請求已提交的結果，
+    所以先結束它，在預設隔離等級的新交易中建立，提交後再開始新的一致讀取交易。"""
+    ctx.db.rollback()
     try:
         ctx.session_row = lock_session(ctx.db, session_token(request), ctx.now)
         ctx.workspace = load_workspace(ctx.db, ctx.session_row.id)
@@ -37,6 +45,8 @@ def _auto_setup(request: Request, ctx: CommandContext) -> None:
     except BaseException:
         ctx.db.rollback()
         raise
+    begin_consistent_read(ctx.db, ctx.session_row)
+    ctx.workspace = load_workspace(ctx.db, ctx.session_row.id)
 
 
 @router.get("/view")

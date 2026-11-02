@@ -128,8 +128,8 @@ def test_cannot_skip_step_409(api: ApiClient) -> None:
     assert api.snapshot() == before
     # 不存在的步驟
     assert _error(_execute(api, "sales", "nope")) == (422, "learning_step_invalid")
-    # 還沒開始的路線
-    assert _error(_execute(api, "manufacturing", "fund-business"))[0] in (403, 409)
+    # 還沒開始的路線（retail 沒有製造模組，模組閘先擋）
+    assert _error(_execute(api, "manufacturing", "fund-business")) == (403, "module_disabled")
     assert api.snapshot() == before
 
 
@@ -289,3 +289,50 @@ def test_listing_without_workspace_lists_requirements(api: ApiClient) -> None:
     assert body["available_paths"] == [] and body["sessions"] == [] and body["active"] is None
     assert [p["id"] for p in body["paths"]] == list(PATHS)
     assert all(p["available"] is False and p["modules"] for p in body["paths"])
+
+
+def test_peek_skips_oversized_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """超過 body 上限的請求不先解析 JSON（交給管線回 413），上限內才讀 step_id。"""
+    from src.modules.learning import router as learning_router
+    from src.platform.pipeline import BODY_LIMIT
+
+    small = b'{"step_id": "a"}'
+    assert learning_router._peek(small) == {"step_id": "a"}
+    big = b'{"step_id": "a", "pad": "' + b"x" * BODY_LIMIT + b'"}'
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("超過上限時不應解析 JSON")
+
+    monkeypatch.setattr(learning_router.json, "loads", boom)
+    assert learning_router._peek(big) is None
+
+
+def test_execute_oversized_body_413(api: ApiClient) -> None:
+    api.setup("retail")
+    state = api.state()
+    r = api.client.post(
+        f"{LEARNING}/sales/execute",
+        content=b'{"step_id": "a", "pad": "' + b"x" * 40_000 + b'"}',
+        headers={
+            "Origin": "http://testserver",
+            "x-csrf-token": state["csrf"],
+            "Idempotency-Key": "oversize-key-1",
+            "If-Match-Version": str(state["version"]),
+            "Content-Type": "application/json",
+        },
+    )
+    assert _error(r) == (413, "body_limit")
+
+
+def test_expired_tolerates_naive_and_invalid_times() -> None:
+    """報價期限格式不符（含沒有時區、無法與目前時間比較）一律視為已失效，不拋例外。"""
+    from datetime import UTC, datetime
+
+    from src.modules.learning.paths import _expired
+
+    now = datetime(2026, 11, 2, tzinfo=UTC)
+    assert _expired("2026-11-01T00:00:00.000Z", now) is True
+    assert _expired("2026-11-03T00:00:00.000Z", now) is False
+    assert _expired("2026-11-03T00:00:00", now) is True
+    assert _expired("not a date", now) is True
+    assert _expired(None, now) is True

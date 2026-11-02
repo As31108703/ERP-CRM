@@ -96,6 +96,8 @@ CREATE TABLE purchase (
 );
 
 CREATE INDEX purchase_workspace_seq_idx ON purchase (workspace_id, seq);
+-- 複合外鍵的參照端索引：串聯刪除與外鍵檢查不必掃整個工作區
+CREATE INDEX purchase_product_idx ON purchase (workspace_id, product_id);
 -- +goose StatementEnd
 
 -- +goose Down

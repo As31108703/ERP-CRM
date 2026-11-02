@@ -15,12 +15,13 @@ from src.core.money import check_int
 from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import Template
 from src.modules.crm.entity import CrmRecordRow
+from src.modules.crm.records import find_record
 from src.modules.crm.service import list_records
 from src.modules.services.entity import ServiceDeliveryRow, ServiceRow
 from src.modules.wallets import service as wallets
 from src.modules.wallets.service import LedgerView, ledger_invalid, register_ledger_rule
 from src.platform.context import CommandContext
-from src.platform.records import find_record, record_missing, scoped_get
+from src.platform.records import crm_record_missing, record_missing, scoped_get
 
 DRAFT = "draft"
 CONFIRMED = "confirmed"
@@ -141,7 +142,7 @@ def deliver_service(ctx: CommandContext, p: dict[str, Any]) -> str:
     ensure(s.paid_minor == 0, 409, "simulation_service_paid", "已收模擬款的服務不可改交付。")
     ref = p.get("artifact_ref")
     if not isinstance(ref, str):
-        raise Problem(422, "delivery_invalid", "交付摘要不符")
+        raise Problem(422, "delivery_invalid", "交付內容參照須為文字")
     revision = len(deliveries_of(ctx.db, ctx.workspace_id, [s.id])[s.id]) + 1
     delivery = ServiceDeliveryRow(
         workspace_id=s.workspace_id,
@@ -208,8 +209,8 @@ def pay_service(ctx: CommandContext, p: dict[str, Any]) -> str:
 
 def seed_services(ctx: CommandContext, template: Template) -> None:
     """B§3.0：同時啟用 crm 與 services 時，為示範案件建立範本價格的草稿服務。"""
-    assert ctx.workspace is not None
-    modules = ctx.workspace.modules
+    workspace = ctx.require_workspace()
+    modules = workspace.modules
     if "crm" not in modules or "services" not in modules:
         return
     case = list_records(ctx.db, ctx.workspace_id, "cases")[0]
@@ -226,7 +227,7 @@ def _service_pay_rule(
     來源不是買家 422 ledger_invalid。"""
     service = scoped_get(db, ServiceRow, workspace_id, ledger.reference_id)
     if service is None:
-        raise Problem(404, "record_missing", "找不到工作區紀錄")
+        raise crm_record_missing()
     business = ledger.system["business"].id
     source = next((w for w, _ in ledger.entries if w != business), None)
     source_row = ledger.wallets.get(source) if source is not None else None

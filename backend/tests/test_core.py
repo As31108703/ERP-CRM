@@ -306,3 +306,11 @@ def test_engine_hides_parameters_in_errors(test_settings, db_engine):
     message = str(err.value)
     assert "hidden due to hide_parameters" in message
     assert "d" * 64 not in message
+
+
+def test_format_sim() -> None:
+    from src.core.money import format_sim
+
+    assert format_sim(0) == "0.00 SIM"
+    assert format_sim(123_450) == "1,234.50 SIM"
+    assert format_sim(-5) == "-0.05 SIM"

@@ -8,16 +8,16 @@ from sqlmodel import Session
 
 from src.modules.administration.metrics import admin_metrics
 from src.modules.reports.service import build_report
-from tests.helpers import ApiClient
-from tests.test_sales import (
+from tests.helpers import (
     ORDERS,
     PRICE,
-    _buyer,
-    _create_order,
-    _fund,
-    _line_ids,
-    _ship_body,
-    _stocked_product,
+    ApiClient,
+    buyer_wallet,
+    create_order,
+    fund,
+    line_ids,
+    ship_body,
+    stocked_product,
 )
 
 REPORTS = "/api/v1/reports"
@@ -58,13 +58,13 @@ def _report(api: ApiClient) -> dict[str, Any]:
 
 def _shipped_order(api: ApiClient) -> tuple[str, str, str]:
     """Task 6 流程：成本 100×2、200×2 兩批入庫（目錄成本最後改為 200），售出 3 件並出貨。"""
-    pid = _stocked_product(api, [(2, 100), (2, 200)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 3 * PRICE)
-    oid = _create_order(api, buyer, [(pid, 3)])
+    pid = stocked_product(api, [(2, 100), (2, 200)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 3 * PRICE)
+    oid = create_order(api, buyer, [(pid, 3)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 3 * PRICE})
-    [lid] = _line_ids(api, oid)
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 3)]))
+    [lid] = line_ids(api, oid)
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 3)]))
     return pid, oid, lid
 
 
@@ -107,7 +107,7 @@ def test_report_fifo_cogs(api: ApiClient) -> None:
 def test_report_after_partial_return(api: ApiClient) -> None:
     api.setup("general", modules=["inventory", "sales", "wallets"])
     _, oid, lid = _shipped_order(api)
-    api.ok("POST", f"{ORDERS}/{oid}/return", _ship_body([(lid, 1)]))
+    api.ok("POST", f"{ORDERS}/{oid}/return", ship_body([(lid, 1)]))
     report = _report(api)
     # 退回的一件沖回第一個成本層：COGS = 100×(2−1) + 200×1
     assert report == {
@@ -121,7 +121,7 @@ def test_report_after_partial_return(api: ApiClient) -> None:
         "service_payments_minor": 0,
     }
     # 全部退完：毛利歸零，成本全數回到庫存
-    api.ok("POST", f"{ORDERS}/{oid}/return", _ship_body([(lid, 2)]))
+    api.ok("POST", f"{ORDERS}/{oid}/return", ship_body([(lid, 2)]))
     report = _report(api)
     assert (
         report["sales_minor"],
@@ -146,8 +146,8 @@ def test_report_service_payments(api: ApiClient) -> None:
         f"{SERVICES}/{sid}/accept",
         {"delivery_id": delivery["id"], "digest": delivery["digest"]},
     )
-    buyer = _buyer(api)
-    _fund(api, buyer, 1000)
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 1000)
     api.ok("POST", f"{SERVICES}/{sid}/pay", {"buyer_wallet_id": buyer, "amount_minor": 400})
     assert _report(api)["service_payments_minor"] == 400
 

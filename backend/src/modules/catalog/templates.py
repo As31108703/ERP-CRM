@@ -223,15 +223,12 @@ def resolve_modules(industry: str, modules: list[str] | None) -> list[str]:
     """依範本決定啟用模組：未指定時用範本預設；指定時須為不重複的已知模組且相依齊全。"""
     template = get_template(industry)
     selected: object = template.modules if modules is None else modules
-    ensure(
+    if not (
         isinstance(selected, list)
         and all(isinstance(m, str) and m in MODULES for m in selected)
-        and len(set(selected)) == len(selected),
-        422,
-        "module_invalid",
-        "無效模組",
-    )
-    assert isinstance(selected, list)
+        and len(set(selected)) == len(selected)
+    ):
+        raise Problem(422, "module_invalid", "無效模組")
     for m in selected:
         deps = MODULE_DEPENDENCIES.get(m, [])
         ensure(

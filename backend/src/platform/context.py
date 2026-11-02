@@ -9,6 +9,7 @@ from sqlmodel import Field, Session, SQLModel
 
 from src.config.settings import Settings
 from src.core import clock
+from src.core.problem import Problem
 
 
 def _tz() -> Column:  # type: ignore[type-arg]
@@ -74,3 +75,9 @@ class CommandContext:
         if self.workspace is None:
             raise RuntimeError("此命令需要工作區")
         return str(self.workspace.id)
+
+    def require_workspace(self) -> WorkspaceRow:
+        """目前的工作區；沒有工作區時 409 workspace_missing（讀取與寫入共用的閘）。"""
+        if self.workspace is None:
+            raise Problem(409, "workspace_missing", "請先建立工作區")
+        return self.workspace

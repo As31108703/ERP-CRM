@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from src.modules.learning import service
 from src.platform.context import CommandContext
 from src.platform.pipeline import (
+    BODY_LIMIT,
     CommandPipeline,
     MutationResponse,
     get_pipeline,
@@ -62,7 +63,9 @@ def view(
 
 
 def _peek(raw: bytes) -> Any:
-    """先讀出 step_id 以決定 action；格式錯誤交給管線回正式的錯誤碼。"""
+    """先讀出 step_id 以決定 action；超過 body 上限或格式錯誤時不解析，交給管線回正式的錯誤碼。"""
+    if len(raw) > BODY_LIMIT:
+        return None
     try:
         return json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):

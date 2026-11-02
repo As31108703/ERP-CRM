@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from src.core.problem import ensure
 from src.modules.learning.service import available_paths
 from src.modules.workbench import index, queue, readiness, roles
 from src.modules.workbench.first_run import first_run
@@ -22,9 +21,7 @@ SEARCH_PAGE_MAX = 50
 
 
 def _world(ctx: CommandContext) -> index.World:
-    ensure(ctx.workspace is not None, 409, "workspace_missing", "請先建立工作區")
-    assert ctx.workspace is not None
-    data = workspace_service.snapshot(ctx.db, ctx.workspace, ctx.session_row.version)
+    data = workspace_service.snapshot(ctx.db, ctx.require_workspace(), ctx.session_row.version)
     return index.World(data)
 
 
@@ -53,6 +50,5 @@ def search(
 @router.get("/first-run")
 def first_run_guide(ctx: CommandContext = Touch) -> dict[str, Any]:
     data = first_run(_world(ctx))
-    ws = ctx.workspace  # _world 已確認工作區存在
-    data["learning_available"] = len(available_paths(ctx.db, str(ws.id))) if ws else 0
+    data["learning_available"] = len(available_paths(ctx.db, ctx.workspace_id))
     return data
