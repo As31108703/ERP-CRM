@@ -41,7 +41,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: `/m/:module(${MODULE_ROUTES.join("|")})`,
     name: "module",
-    component: Placeholder,
+    component: () => import("./views/ModuleView.vue"),
     meta: { title: "模組" },
   },
   { path: "/:rest(.*)*", redirect: "/overview" },

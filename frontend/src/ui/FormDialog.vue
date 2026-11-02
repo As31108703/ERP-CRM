@@ -5,7 +5,8 @@ import Dialog from "./Dialog.vue";
 export interface FormField {
   name: string;
   label: string;
-  type?: "text" | "number" | "textarea" | "select" | "date" | "datetime-local";
+  /** money：以 SIM 輸入（最多兩位小數），值以原字串送出，由呼叫端換算成 minor。 */
+  type?: "text" | "number" | "textarea" | "select" | "date" | "datetime-local" | "email" | "money";
   required?: boolean;
   min?: number;
   max?: number;
@@ -17,6 +18,7 @@ export interface FormField {
 /**
  * 一般表單對話框。`blocked` 有值時（例如外觀試看中、上次操作未確認）停用送出並顯示原因。
  * 送出時 emit 欄位值（number 欄位轉成數字，空字串保留給呼叫端決定）。
+ * `error` 顯示本地驗證或伺服器錯誤；沒有欄位時顯示「確認執行此模擬操作？」。
  */
 const props = withDefaults(
   defineProps<{
@@ -27,8 +29,9 @@ const props = withDefaults(
     submitLabel?: string;
     busy?: boolean;
     blocked?: string;
+    error?: string;
   }>(),
-  { initial: () => ({}), submitLabel: "送出", busy: false, blocked: "" },
+  { initial: () => ({}), submitLabel: "送出", busy: false, blocked: "", error: "" },
 );
 const emit = defineEmits<{ submit: [values: Record<string, string | number>]; close: [] }>();
 
@@ -64,13 +67,18 @@ function submit(): void {
   <Dialog :open="open" :title="title" @close="emit('close')">
     <form :id="formId" class="fdlg" novalidate @submit.prevent="submit">
       <p v-if="blocked" class="fdlg__blocked" role="alert">{{ blocked }}</p>
+      <p v-if="fields.length === 0" class="fdlg__confirm">確認執行此模擬操作？</p>
       <label v-for="f in fields" :key="f.name" class="field">
         <span class="field__label">{{ f.label }}<span v-if="f.required" class="field__req" aria-hidden="true"> *</span></span>
-        <textarea v-if="f.type === 'textarea'" v-model="values[f.name]" :required="f.required" :maxlength="f.maxlength" rows="3" />
+        <textarea v-if="f.type === 'textarea'" v-model="values[f.name]" :required="f.required" :maxlength="f.maxlength ?? 1000" rows="3" />
         <select v-else-if="f.type === 'select'" v-model="values[f.name]" :required="f.required">
           <option value="">請選擇</option>
           <option v-for="o in f.options ?? []" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
+        <span v-else-if="f.type === 'money'" class="fdlg__money">
+          <input v-model="values[f.name]" type="text" inputmode="decimal" :required="f.required" maxlength="20" class="num" />
+          <span class="fdlg__unit num" aria-hidden="true">SIM</span>
+        </span>
         <input
           v-else
           v-model="values[f.name]"
@@ -78,11 +86,12 @@ function submit(): void {
           :required="f.required"
           :min="f.min"
           :max="f.max"
-          :maxlength="f.maxlength"
+          :maxlength="f.maxlength ?? 1000"
           :class="{ num: f.type === 'number' }"
         />
         <span v-if="f.hint" class="field__hint">{{ f.hint }}</span>
       </label>
+      <p v-if="error" class="fdlg__error" role="alert" data-testid="form-error">{{ error }}</p>
     </form>
     <template #footer>
       <button type="button" class="btn btn--ghost" @click="emit('close')">取消</button>
@@ -103,6 +112,27 @@ function submit(): void {
   padding: 8px 10px;
   border-left: 3px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.fdlg__confirm {
+  margin: 0;
+}
+.fdlg__error {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.fdlg__money {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fdlg__money input {
+  flex: 1;
+}
+.fdlg__unit {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
 }
 .field__req {
   color: var(--danger);
