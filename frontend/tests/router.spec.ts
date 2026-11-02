@@ -54,4 +54,15 @@ describe("router", () => {
     await router.push("/");
     expect(router.currentRoute.value.path).toBe("/overview");
   });
+  it("a failed first view load does not route to /build as if no workspace existed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json(500, { error: { code: "internal_error", message: "伺服器暫時無法回應" } })),
+    );
+    const router = await makeRouter();
+    await router.push("/overview");
+    expect(router.currentRoute.value.path).toBe("/overview");
+    const { useWorkspaceStore } = await import("../src/stores/workspace");
+    expect(useWorkspaceStore().loadFailed).toBe(true);
+  });
 });

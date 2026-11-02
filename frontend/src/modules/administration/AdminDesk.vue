@@ -512,7 +512,7 @@ const counts = computed(() => Object.fromEntries(ADMIN_TABS.map((t) => [t.id, de
     <PageHead
       code="OFFICE · DESK · SIM-HR"
       title="行政工作台"
-      lead="以合成資料練習組織、假員工、週班表、手動出勤、申請、設備借用與公告。所有時間以台北時間（UTC+08:00）呈現，不作薪資、准假、採購或付款依據。"
+      lead="以合成資料練習組織、假員工、週班表、手動出勤、申請、設備借用與公告。所有時間以臺北時間（UTC+08:00）呈現，不作薪資、准假、採購或付款依據。"
     >
       <template v-if="active">
         <button

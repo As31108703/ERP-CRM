@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { DESIGN_PREVIEW_BLOCKED, PENDING_BLOCKED, useWorkspaceStore } from "../../stores/workspace";
+import { useWorkspaceStore } from "../../stores/workspace";
 import Dialog from "../../ui/Dialog.vue";
 import type { AdminCommand, AdminField, AdminFormSpec, AdminValues } from "./adminForms";
 
@@ -30,11 +30,7 @@ watch(
   { immediate: true },
 );
 
-const blocked = computed(() => {
-  if (store.designPreview) return DESIGN_PREVIEW_BLOCKED;
-  if (store.pending) return PENDING_BLOCKED;
-  return "";
-});
+const blocked = computed(() => store.formBlockedReason);
 
 const shown = computed(() => (props.spec?.fields ?? []).filter((f) => (f.show ? f.show(values) : true)));
 const shownError = computed(() => localError.value || props.error);

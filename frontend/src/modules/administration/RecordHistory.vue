@@ -4,7 +4,7 @@ import type { Row } from "../../lib/records";
 import { taipeiDateTime } from "./adminModel";
 
 /**
- * 更正與保留紀錄（A§5「History panel」）：每筆顯示種類、台北時間與原因，
+ * 更正與保留紀錄（A§5「History panel」）：每筆顯示種類、臺北時間與原因，
  * 再以「欄位／更正前／更正後」三欄表比對差異。沒有紀錄時不顯示。
  */
 const props = defineProps<{ changes: Row[] }>();

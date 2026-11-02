@@ -54,7 +54,7 @@ describe("adminForms", () => {
     if (!isCommand(exactly48)) return;
     expect(exactly48.method).toBe("POST");
     expect(exactly48.path).toBe("/api/v1/administration/shifts");
-    // 台北時間輸入，送出帶 +08:00 的分鐘對齊時間；unit_id 由假員工推得。
+    // 臺北時間輸入，送出帶 +08:00 的分鐘對齊時間；unit_id 由假員工推得。
     expect(exactly48.body).toEqual({
       staff_id: "s1",
       unit_id: "u1",
@@ -71,7 +71,7 @@ describe("adminForms", () => {
   it("correction with no change rejected", () => {
     const row = desk().shifts[0];
     const spec = correctionForm("shift", row);
-    // 預設值就是原紀錄（台北時間）。
+    // 預設值就是原紀錄（臺北時間）。
     expect(spec.initial.start_at).toBe("2026-11-02T09:00");
     expect(spec.initial.end_at).toBe("2026-11-02T17:00");
 

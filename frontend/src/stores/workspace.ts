@@ -44,6 +44,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   const designPreview = ref(false);
 
   const hasWorkspace = computed(() => Boolean(view.value?.workspace));
+  /**
+   * 已讀取過但沒有 view（請求失敗）：狀態未知，不能當成「沒有工作區」導向 /build，
+   * 由 App 顯示錯誤與「重新讀取」。
+   */
+  const loadFailed = computed(() => loaded.value && view.value === null);
 
   let firstLoad: Promise<void> | null = null;
 
@@ -95,6 +100,16 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   function setDesignPreview(active: boolean): void {
     designPreview.value = active;
   }
+
+  /**
+   * 表單對話框的停用原因（外觀試看中、上次操作未確認）；處理中由各表單的 busy 狀態另外呈現。
+   * 行政表單與各模組的命令表單共用這一個來源。
+   */
+  const formBlockedReason = computed(() => {
+    if (designPreview.value) return DESIGN_PREVIEW_BLOCKED;
+    if (pending.value) return PENDING_BLOCKED;
+    return "";
+  });
 
   function blockedReason(): string | null {
     if (designPreview.value) return DESIGN_PREVIEW_BLOCKED;
@@ -176,12 +191,14 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     loaded,
     designPreview,
     hasWorkspace,
+    loadFailed,
     refresh,
     ready,
     run,
     upload,
     retry,
     blockedReason,
+    formBlockedReason,
     setDesignPreview,
     dismissMessage,
   };

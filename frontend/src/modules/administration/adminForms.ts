@@ -143,9 +143,9 @@ interface Span {
 /** 起訖時間：可解析、結束晚於開始、長度不超過上限。 */
 function readInterval(values: AdminValues, maxMinutes: number): Span | string {
   const start = taipeiInputToIso(text(values, "start_at"));
-  if (!start) return "請輸入有效的開始時間（台北時間）。";
+  if (!start) return "請輸入有效的開始時間（臺北時間）。";
   const end = taipeiInputToIso(text(values, "end_at"));
-  if (!end) return "請輸入有效的結束時間（台北時間）。";
+  if (!end) return "請輸入有效的結束時間（臺北時間）。";
   const minutes = durationMinutes(start, end);
   if (minutes <= 0) return "結束時間必須晚於開始時間。";
   if (maxMinutes === MINUTES_48H && minutes > maxMinutes) return "時段不可超過 48 小時。";
@@ -162,7 +162,7 @@ function readBreak(values: AdminValues, minutes: number): number | string {
 
 function weekDate(values: AdminValues, name: string, label: string): string | { error: string } {
   const date = text(values, name);
-  if (!isValidDate(date) || !isMonday(date)) return { error: `「${label}」請選擇星期一（台北時間）。` };
+  if (!isValidDate(date) || !isMonday(date)) return { error: `「${label}」請選擇星期一（臺北時間）。` };
   return date;
 }
 
@@ -211,7 +211,7 @@ export const DEMO_PRESETS: AdminOption[] = [
   { value: "factory", label: "工廠（合成示範廠務組）" },
 ];
 
-const TIME_HINT = "以台北時間（UTC+08:00）輸入，精確到分鐘。";
+const TIME_HINT = "以臺北時間（UTC+08:00）輸入，精確到分鐘。";
 
 // ── 啟用與示範 ───────────────────────────────────────────
 
@@ -922,7 +922,7 @@ function noticeBody(v: AdminValues): NoticeBody | string {
   let due_at: string | null = null;
   if (dueText) {
     due_at = taipeiInputToIso(dueText);
-    if (!due_at) return "請輸入有效的截止時間（台北時間）。";
+    if (!due_at) return "請輸入有效的截止時間（臺北時間）。";
   }
   return {
     title: text(v, "title"),

@@ -59,6 +59,8 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
   router.beforeEach(async (to) => {
     const store = useWorkspaceStore();
     await store.ready();
+    // 讀取失敗時狀態未知：留在原路由，由 App 顯示錯誤與重試；重試成功後 App 會重跑這個守衛。
+    if (store.loadFailed) return true;
     const name = typeof to.name === "string" ? to.name : "";
     if (!store.hasWorkspace) {
       if (!(SETUP_ROUTES as readonly string[]).includes(name)) return { path: "/build" };

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { pendingStorageVolatile } from "./api/pending";
 import GlobalSearch from "./modules/overview/GlobalSearch.vue";
 import QuickCreate from "./modules/overview/QuickCreate.vue";
 import { useUiStore } from "./stores/ui";
-import { useWorkspaceStore } from "./stores/workspace";
+import { NO_VIEW_BLOCKED, useWorkspaceStore } from "./stores/workspace";
 import AppShell from "./ui/AppShell.vue";
 import Toast from "./ui/Toast.vue";
 
@@ -21,6 +21,14 @@ const targeted = computed(
     route.query.target !== "",
 );
 
+// 讀取失敗後重新讀取成功：以目前路由重新導覽一次，讓守衛依實際狀態決定（例如沒有工作區時前往 /build）。
+watch(
+  () => store.loadFailed,
+  (failed, was) => {
+    if (was && !failed) void router.replace({ path: route.path, query: route.query, hash: route.hash, force: true });
+  },
+);
+
 function clearTarget(): void {
   const query = { ...route.query };
   delete query.target;
@@ -32,7 +40,7 @@ function clearTarget(): void {
   <AppShell @search="ui.openSearch()" @quick-create="ui.openQuickCreate()">
     <template #notices>
       <template v-if="store.loaded">
-        <Toast v-if="store.error" tone="danger" title="操作尚未完成">
+        <Toast v-if="store.error && !store.loadFailed" tone="danger" title="操作尚未完成">
           {{ store.error }}
           <template #actions>
             <button type="button" class="btn btn--sm" :disabled="store.busy" @click="store.refresh()">重新讀取</button>
@@ -57,6 +65,14 @@ function clearTarget(): void {
       <span class="app-loading__orbit" aria-hidden="true" />
       準備你的測試工作區
     </p>
+    <section v-else-if="store.loadFailed" class="app-failed" role="alert" data-testid="load-failed">
+      <h1 class="app-failed__title">無法取得工作區狀態</h1>
+      <p>{{ store.error || NO_VIEW_BLOCKED }}</p>
+      <p class="app-failed__note">工作區資料沒有變動，請稍候再按「重新讀取」。</p>
+      <button type="button" class="btn btn--primary" data-testid="load-retry" :disabled="store.busy" @click="store.refresh()">
+        重新讀取
+      </button>
+    </section>
     <RouterView v-else />
     <template v-if="store.loaded && store.hasWorkspace">
       <GlobalSearch />
@@ -81,6 +97,26 @@ function clearTarget(): void {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: app-spin 0.9s linear infinite;
+}
+.app-failed {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  max-width: 560px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.app-failed p {
+  margin: 0;
+}
+.app-failed__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+.app-failed__note {
+  color: var(--ink-dim);
 }
 @keyframes app-spin {
   to {
