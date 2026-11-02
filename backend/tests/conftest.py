@@ -2,18 +2,29 @@
 
 import os
 import subprocess
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import psycopg
 import pytest
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from psycopg import sql
 from sqlalchemy import Engine, create_engine, text
 
 from src.app import create_app
 from src.config.settings import AppConfig, DatabaseConfig, Settings
+from src.core.problem import Problem
+from src.platform.context import CommandContext, HistoryRow
+from src.platform.pipeline import (
+    CommandPipeline,
+    MutationResponse,
+    get_pipeline,
+    raw_body,
+    touch_session,
+)
 from tests.helpers import ApiClient
 
 TEST_DATABASE_URL = os.environ.get(
@@ -79,9 +90,111 @@ def _truncate_tables(db_engine: Engine) -> Iterator[None]:
             conn.execute(text(f"TRUNCATE {names} CASCADE"))
 
 
+def _echo(_ctx: CommandContext, payload: dict) -> str | None:
+    return "ok"
+
+
+def _boom(ctx: CommandContext, _payload: dict) -> str | None:
+    # 先寫入一筆 history 再失敗，用來確認整筆回滾
+    assert ctx.workspace is not None
+    ctx.db.add(HistoryRow(workspace_id=ctx.workspace.id, action="test.boom", version=999))
+    ctx.db.flush()
+    raise Problem(422, "test_boom", "測試用失敗")
+
+
+def _slow(_ctx: CommandContext, _payload: dict) -> str | None:
+    # 拉長持鎖時間，讓並行測試的兩個請求確實重疊
+    time.sleep(0.3)
+    return "slow"
+
+
+def make_test_router() -> APIRouter:
+    """只在測試時掛上的 `/api/v1/_test/*` 路由。"""
+    router = APIRouter(prefix="/api/v1/_test")
+    Pipeline = Depends(get_pipeline)
+    Raw = Depends(raw_body)
+
+    @router.get("/csrf")
+    def csrf(ctx: CommandContext = Depends(touch_session)) -> dict[str, object]:
+        return {"csrf": ctx.session_row.csrf, "version": ctx.session_row.version}
+
+    @router.post("/echo")
+    def echo(
+        request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(
+            request, raw, action="test.echo", handler=_echo, needs_workspace=False
+        )
+
+    @router.post("/command")
+    def command(
+        request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(request, raw, action="test.command", handler=_echo)
+
+    @router.post("/boom")
+    def boom(
+        request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(request, raw, action="test.boom", handler=_boom)
+
+    @router.post("/slow")
+    def slow(
+        request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(request, raw, action="test.slow", handler=_slow)
+
+    @router.post("/prune")
+    def prune(
+        request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(
+            request,
+            raw,
+            action="test.prune",
+            handler=_echo,
+            needs_workspace=False,
+            prunes_receipts=True,
+            bypass_receipt_cap=True,
+        )
+
+    @router.post("/module/{name}")
+    def module(
+        name: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
+    ) -> MutationResponse:
+        return pipeline.mutate(request, raw, action=f"{name}.test", handler=_echo, module=name)
+
+    return router
+
+
+def build_test_app(settings: Settings) -> FastAPI:
+    app = create_app(settings)
+    app.include_router(make_test_router())
+    return app
+
+
+@pytest.fixture
+def make_client(test_settings: Settings, db_engine: Engine) -> Iterator[Callable[..., TestClient]]:
+    """以覆寫過的 app 設定建立 TestClient，例如 `make_client(public_demo=True)`。"""
+    opened: list[TestClient] = []
+
+    def factory(**app_overrides: object) -> TestClient:
+        settings = test_settings.model_copy(
+            update={"app": test_settings.app.model_copy(update=app_overrides)}
+        )
+        c = TestClient(build_test_app(settings), base_url="http://testserver")
+        c.__enter__()
+        opened.append(c)
+        return c
+
+    yield factory
+    for c in opened:
+        c.__exit__(None, None, None)
+
+
 @pytest.fixture
 def client(test_settings: Settings, db_engine: Engine) -> Iterator[TestClient]:
-    with TestClient(create_app(test_settings), base_url="http://testserver") as c:
+    with TestClient(build_test_app(test_settings), base_url="http://testserver") as c:
         yield c
 
 
