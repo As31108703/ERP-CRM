@@ -456,6 +456,8 @@ def test_launch_kit_zip_contents(api: ApiClient) -> None:
         env = _env(zf.read(".env").decode("utf-8"))
         assert env["APP__AUTO_SETUP"] == "true"
         assert env["APP__PUBLIC_DEMO"] == "false"
+        # 覆蓋原有 .env 後仍保留前端連接埠設定（docker compose 讀取）
+        assert env["FRONTEND_PORT"] == "8080"
         assert env["APP__DEFAULT_INDUSTRY"] == "general"
         assert env["APP__DEFAULT_COMPANY"] == "'星軌示範商店'"
         assert json.loads(env["APP__DEFAULT_MODULES"]) == [
@@ -471,6 +473,10 @@ def test_launch_kit_zip_contents(api: ApiClient) -> None:
         readme = zf.read("README.txt").decode("utf-8")
         assert "根目錄" in readme
         assert "start.sh" in readme and "start.cmd" in readme
+        # 既有資料庫沿用初始化時的密碼：自訂過密碼的使用者要把它保留在新的 .env
+        assert "./data/postgres" in readme
+        assert "DATABASE__PASSWORD" in readme
+        assert "FRONTEND_PORT" in readme
 
 
 def test_launch_kit_default_modules_and_quoting(api: ApiClient) -> None:

@@ -213,11 +213,13 @@ curl http://localhost:8080/api/health
 
 在建置精靈第 3 步選「下載本機啟動包」，或在自訂建置頁下載，會呼叫 `GET /api/v1/backup/launch-kit`，取得 `erpcrm-launch-kit.zip`。內容如下：
 
-- `.env`：自架模式，`APP__AUTO_SETUP=true`，並帶入所選的產業、公司名稱與模組。
+- `.env`：自架模式，`APP__AUTO_SETUP=true`，並帶入所選的產業、公司名稱與模組；資料庫帳密為 `erpcrm`，`FRONTEND_PORT=8080`。
 - `start.sh`、`start.cmd`：執行 `docker compose up -d --build`。
 - `README.txt`：使用步驟。
 
 把這四個檔案解壓縮到專案根目錄（與 `docker-compose.yaml` 同一層；原有的 `.env` 會被覆蓋），執行 `./start.sh`（Windows 用 `start.cmd`），再開啟 <http://localhost:8080>。第一次進站就會依設定自動建立工作區。
+
+PostgreSQL 只在 `./data/postgres` 第一次建立時設定密碼，之後一律沿用。原本的 `.env` 若改過 `DATABASE__PASSWORD`（或 `FRONTEND_PORT`），請把同樣的值填回新的 `.env`，否則後端會連不上資料庫。啟動包的 `README.txt` 也有同樣的提醒。
 
 ## 本機開發
 
