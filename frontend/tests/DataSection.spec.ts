@@ -60,6 +60,8 @@ describe("DataSection", () => {
     const card = w.get("[data-record-id=r27]");
     expect(card.classes()).toContain("is-target");
     expect(card.text()).toContain("目前定位");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(card.element);
     w.unmount();
   });
 

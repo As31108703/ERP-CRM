@@ -112,7 +112,10 @@ watch(
     status.value = "";
     page.value = Math.floor(index / PAGE_SIZE);
     await nextTick();
-    const card = listEl.value?.querySelector<HTMLElement>(`[data-record-id="${CSS.escape(id)}"]`);
+    // 以 dataset 比對而非組 CSS 選擇器：不依賴 CSS.escape（jsdom 與部分舊瀏覽器沒有），id 含特殊字元也安全。
+    const card = Array.from(listEl.value?.querySelectorAll<HTMLElement>("[data-record-id]") ?? []).find(
+      (el) => el.dataset.recordId === id,
+    );
     if (!card) return;
     card.focus({ preventScroll: true });
     card.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });

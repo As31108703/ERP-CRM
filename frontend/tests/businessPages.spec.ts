@@ -3,7 +3,7 @@ import CrmPage from "../src/modules/crm/CrmPage.vue";
 import InventoryPage from "../src/modules/inventory/InventoryPage.vue";
 import ServicesPage from "../src/modules/services/ServicesPage.vue";
 import WalletsPage from "../src/modules/wallets/WalletsPage.vue";
-import { BASE_WALLETS, buttonIn, card, fieldByLabel, mountPage, submitDialog, workspace } from "./pageHarness";
+import { BASE_WALLETS, buttonIn, card, fieldByLabel, flush, mountPage, submitDialog, workspace } from "./pageHarness";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -186,6 +186,8 @@ describe("crm page", () => {
     const { wrapper } = await mountPage(CrmPage, CRM, { module: "crm", query: { target: "deal:d1" } });
     expect(card(wrapper, "d1").classes()).toContain("is-target");
     expect(card(wrapper, "c1").classes()).not.toContain("is-target");
+    await flush();
+    expect(document.activeElement).toBe(card(wrapper, "d1").element);
   });
 });
 
