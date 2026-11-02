@@ -1,0 +1,35 @@
+# 文件草稿（設計、計畫）只留在本機，不進版控
+docs/
+
+# 環境變數與機密
+.env
+.env.*
+!.env.example
+
+# 資料庫與執行期資料
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node / 前端
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+
+# 編輯器與系統
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -1,0 +1,48 @@
+x-default: &default
+  restart: always
+  tty: true
+  stdin_open: true
+  env_file:
+    - .env
+
+services:
+  db:
+    <<: *default
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: $DATABASE__USER
+      POSTGRES_PASSWORD: $DATABASE__PASSWORD
+      POSTGRES_DB: $DATABASE__NAME
+      PGDATA: /data/postgres
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./data/postgres:/data/postgres
+    ports:
+      - 5436:5432
+
+  backend:
+    <<: *default
+    build:
+      context: ./backend
+    environment:
+      DATABASE__HOST: db
+      DATABASE__PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - 8000:8000
+
+  # 前端服務於 Task 19 啟用
+  # frontend:
+  #   <<: *default
+  #   build:
+  #     context: ./frontend
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - 8080:80

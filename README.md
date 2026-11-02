@@ -1,2 +1,4 @@
 # ERP-CRM
 用指令建立ERP/CRM
+
+授權：MIT，見 LICENSE
