@@ -162,7 +162,7 @@ function browseThemes(): void {
           <p v-if="!prefs.persisted" class="cbar__volatile">瀏覽器儲存無法使用，外觀目前只保留在本分頁。</p>
         </div>
       </div>
-      <span class="badge badge--accent cbar__sim num" title="所有金額皆為模擬測試幣">SIM 測試幣</span>
+      <span class="badge badge--accent cbar__sim num" title="所有金額皆為模擬測試幣">SIM<span class="cbar__hide-sm"> 測試幣</span></span>
     </div>
   </header>
 </template>
@@ -301,8 +301,7 @@ function browseThemes(): void {
 }
 @media (max-width: 759.98px) {
   .cbar__hide-sm,
-  .cbar__suffix,
-  .cbar__sim {
+  .cbar__suffix {
     display: none;
   }
   .cbar__context {

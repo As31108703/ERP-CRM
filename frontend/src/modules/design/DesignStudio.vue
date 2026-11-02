@@ -113,7 +113,7 @@ const DENSITY_OPTIONS: { value: Density; label: string }[] = [
 // ── 元件樣本（示範資料，不連 API） ──
 const SAMPLE_ROWS: { kind: LifecycleKind; row: Record<string, unknown>; note: string }[] = [
   { kind: "order", row: { status: "paid", paid_minor: 12000, total_minor: 12000 }, note: "已付清，待出貨" },
-  { kind: "order", row: { status: "cancelled", paid_minor: 0, refunded_minor: 4000 }, note: "付款後取消" },
+  { kind: "order", row: { status: "cancelled", paid_minor: 0, total_minor: 4000, refunded_minor: 4000 }, note: "付清後取消" },
   { kind: "service", row: { status: "submitted" }, note: "交付待驗收" },
   { kind: "workOrder", row: { status: "reserved" }, note: "材料已預留" },
   { kind: "quote", row: { status: "issued" }, note: "已發出，等待確認" },

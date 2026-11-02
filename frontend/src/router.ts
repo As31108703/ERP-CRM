@@ -55,9 +55,10 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
     return true;
   });
 
-  // 離開主題圖庫即取消外觀試看（「到工作台看效果」除外）。
-  router.afterEach((to, from) => {
-    if (from.name === "design" && to.name !== "design") usePreferencesStore().leftDesign();
+  // 前往主題圖庫以外的頁面即取消外觀試看（「到工作台看效果」那一次除外）。
+  router.afterEach((to, _from, failure) => {
+    if (failure) return;
+    usePreferencesStore().navigated(typeof to.name === "string" ? to.name : "");
   });
 
   return router;

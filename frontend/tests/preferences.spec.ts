@@ -120,7 +120,8 @@ describe("preferences", () => {
 
   it("leaving the design page cancels the preview unless kept for 到工作台看效果", async () => {
     stubFetch();
-    const { prefs } = await stores();
+    const { ws, prefs } = await stores();
+    await ws.refresh();
     const { createAppRouter } = await import("../src/router");
     const { createMemoryHistory } = await import("vue-router");
     const router = createAppRouter(createMemoryHistory());
@@ -129,11 +130,34 @@ describe("preferences", () => {
     await router.push("/capabilities");
     expect(prefs.previewing).toBe(false);
 
+    // 到工作台看效果：只保留那一次導覽，之後任何非主題圖庫頁都取消
     await router.push("/design");
     prefs.previewTheme("nebula");
     prefs.keepPreviewForNextNavigation();
     await router.push("/overview");
+    expect(router.currentRoute.value.path).toBe("/overview");
     expect(prefs.previewing).toBe(true);
     expect(root().themeId).toBe("nebula");
+    await router.push("/m/crm");
+    expect(prefs.previewing).toBe(false);
+    expect(ws.designPreview).toBe(false);
+    expect(root().themeId).toBe("bridge");
+  });
+
+  it("a kept preview survives the /build redirect hop only, then cancels on /capabilities", async () => {
+    // 沒有工作區：/overview 被導向 /build，仍算同一次導覽
+    vi.stubGlobal("fetch", vi.fn(async () => json(404, { error: { code: "not_found", message: "找不到資源" } })));
+    const { prefs } = await stores();
+    const { createAppRouter } = await import("../src/router");
+    const { createMemoryHistory } = await import("vue-router");
+    const router = createAppRouter(createMemoryHistory());
+    await router.push("/design");
+    prefs.previewTheme("neon");
+    prefs.keepPreviewForNextNavigation();
+    await router.push("/overview");
+    expect(router.currentRoute.value.path).toBe("/build");
+    expect(prefs.previewing).toBe(true);
+    await router.push("/capabilities");
+    expect(prefs.previewing).toBe(false);
   });
 });

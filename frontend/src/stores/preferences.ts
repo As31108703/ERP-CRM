@@ -150,8 +150,12 @@ export const usePreferencesStore = defineStore("preferences", () => {
     keepPreviewOnce = previewing.value;
   }
 
-  /** 路由離開主題圖庫時呼叫：除非剛要求保留，否則取消試看。 */
-  function leftDesign(): void {
+  /**
+   * 每次導覽完成後由路由呼叫：前往主題圖庫以外的頁面一律取消試看，
+   * 唯一例外是「到工作台看效果」那一次導覽（保留旗標在這一次就清除）。
+   */
+  function navigated(toName: string): void {
+    if (toName === "design") return;
     if (keepPreviewOnce) {
       keepPreviewOnce = false;
       return;
@@ -183,6 +187,6 @@ export const usePreferencesStore = defineStore("preferences", () => {
     setScheme,
     setDensity,
     keepPreviewForNextNavigation,
-    leftDesign,
+    navigated,
   };
 });

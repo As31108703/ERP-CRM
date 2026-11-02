@@ -5,7 +5,7 @@
  * - done：這一段已經完成。
  * - current：下一步要做的段落。
  * - todo：尚未輪到。
- * - failed：單據已取消／撤回／被取代，軌道最後一段標為 failed。
+ * - failed：單據已取消／撤回／被取代，第一個未到達的段落標為 failed。
  */
 export type LifecycleKind = "order" | "service" | "workOrder" | "quote" | "request";
 export type StageState = "done" | "current" | "todo" | "failed";
@@ -75,14 +75,14 @@ function progress(kind: LifecycleKind, done: number): LifecycleStage[] {
   }));
 }
 
-/** 已終止的單據：已到達的段落保留 done，最後一段為 failed，其他為 todo。 */
+/** 已終止的單據：已到達的段落保留 done，第一個未到達的段落為 failed，之後為 todo。 */
 function terminated(kind: LifecycleKind, reached: number): LifecycleStage[] {
   const defs = STAGES[kind];
-  const last = defs.length - 1;
+  const stop = Math.min(reached, defs.length - 1);
   return defs.map(([key, label], i) => ({
     key,
     label,
-    state: i === last ? "failed" : i < reached ? "done" : "todo",
+    state: i < stop ? "done" : i === stop ? "failed" : "todo",
   }));
 }
 
@@ -110,9 +110,12 @@ function lifecycleOf(kind: LifecycleKind, row: Row): Lifecycle {
   switch (kind) {
     case "order": {
       if (status === "cancelled") {
-        // 取消會把已付金額全數退回，所以 refunded > 0 代表曾經付款。
-        const paidBefore = num(row, "refunded_minor") > 0 || num(row, "paid_minor") > 0;
-        return { stages: terminated(kind, paidBefore ? 2 : 1), terminal: "cancelled" };
+        // 取消會把已付金額全數退回（refunded = 取消前的 paid）。付清後才取消 → 卡在出貨；
+        // 未付或只付部分就取消 → 卡在付款。
+        const total = num(row, "total_minor");
+        const paidBefore = Math.max(num(row, "refunded_minor"), num(row, "paid_minor"));
+        const fullyPaid = total > 0 && paidBefore >= total;
+        return { stages: terminated(kind, fullyPaid ? 2 : 1), terminal: "cancelled" };
       }
       const done = orderDone(status, row);
       // 已全部出貨：退貨是選擇性步驟，不標為 current。
