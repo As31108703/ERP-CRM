@@ -51,9 +51,20 @@ export function recordName(row: Row | undefined, fallback = "紀錄"): string {
   return `${fallback} ${row.id.slice(0, 8)}`;
 }
 
-/** 前往某筆紀錄：切到所屬模組頁，以 `?target=<kind>:<id>` 交給 DataSection 定位。 */
+/** 以 `/m/<module>` 呈現的業務模組頁；其他模組（例如行政工作台）是獨立頁面 `/<module>`。 */
+export const MODULE_ROUTES = ["crm", "inventory", "sales", "wallets", "services", "manufacturing", "projects"] as const;
+
+/** 模組頁路徑：業務模組走 `/m/<module>`，其餘走 `/<module>`。 */
+export function modulePath(module: string): string {
+  return (MODULE_ROUTES as readonly string[]).includes(module) ? `/m/${module}` : `/${module}`;
+}
+
+/**
+ * 前往某筆紀錄：切到所屬模組頁，以 `?target=<kind>:<id>` 交給頁面定位
+ * （業務模組由 DataSection、行政工作台由 AdminDesk 處理）。
+ */
 export function targetLocation(target: TargetRef): { path: string; query: { target: string } } {
-  return { path: `/m/${target.module}`, query: { target: `${target.kind}:${target.id}` } };
+  return { path: modulePath(target.module), query: { target: `${target.kind}:${target.id}` } };
 }
 
 /** 解析路由上的定位參數，只有種類相符時回傳 id。 */

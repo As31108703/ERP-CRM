@@ -1,8 +1,9 @@
 import { createRouter, createWebHashHistory, type RouterHistory, type RouteRecordRaw } from "vue-router";
 import { usePreferencesStore } from "./stores/preferences";
+import { MODULE_ROUTES } from "./lib/records";
 import { useWorkspaceStore } from "./stores/workspace";
 
-export const MODULE_ROUTES = ["crm", "inventory", "sales", "wallets", "services", "manufacturing", "projects"] as const;
+export { MODULE_ROUTES };
 
 /** 沒有工作區時仍可進入的頁面，其他一律導向 /build。 */
 export const SETUP_ROUTES = ["design", "custom", "capabilities", "blueprint", "build"] as const;
@@ -16,6 +17,7 @@ const PAGES: Record<string, () => Promise<unknown>> = {
   custom: () => import("./modules/build/CustomSetup.vue"),
   capabilities: () => import("./modules/capabilities/CapabilityMap.vue"),
   blueprint: () => import("./modules/blueprint/BlueprintPage.vue"),
+  administration: () => import("./modules/administration/AdminDesk.vue"),
   reports: () => import("./modules/reports/ReportsPage.vue"),
   settings: () => import("./modules/settings/SettingsPage.vue"),
 };

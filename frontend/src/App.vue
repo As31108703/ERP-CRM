@@ -14,7 +14,12 @@ const ui = useUiStore();
 const route = useRoute();
 const router = useRouter();
 const volatile = computed(() => store.pending !== null && pendingStorageVolatile());
-const targeted = computed(() => route.name === "module" && typeof route.query.target === "string" && route.query.target !== "");
+const targeted = computed(
+  () =>
+    (route.name === "module" || route.name === "administration") &&
+    typeof route.query.target === "string" &&
+    route.query.target !== "",
+);
 
 function clearTarget(): void {
   const query = { ...route.query };

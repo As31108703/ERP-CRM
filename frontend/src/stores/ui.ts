@@ -2,9 +2,8 @@ import { defineStore } from "pinia";
 import { computed, hasInjectionContext, ref, watch } from "vue";
 import { useRouter, type Router } from "vue-router";
 import type { RoleViewId, TargetRef } from "../api/types";
-import { findRow, isRecordKind, moduleOfKind, RECORD_KINDS, targetLocation } from "../lib/records";
+import { findRow, isRecordKind, modulePath, moduleOfKind, RECORD_KINDS, targetLocation } from "../lib/records";
 import { safeSession } from "../lib/storage";
-import { MODULE_ROUTES } from "../router";
 import { useWorkspaceStore } from "./workspace";
 
 export const PIN_LIMIT = 24;
@@ -58,7 +57,7 @@ function readPref(key: string, field: string): unknown {
 
 /** 非單筆紀錄的頁面（行政、報表、教學、設定等）沒有 `/m/` 前綴。 */
 export function moduleLocation(module: string): string {
-  return (MODULE_ROUTES as readonly string[]).includes(module) ? `/m/${module}` : `/${module}`;
+  return modulePath(module);
 }
 
 /**

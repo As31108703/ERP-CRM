@@ -41,3 +41,27 @@ export async function downloadFile(url: string, filename: string): Promise<strin
     inflight.value--;
   }
 }
+
+/**
+ * 以同樣的 fetch 與錯誤解碼規則讀取文字內容（例如列印前取得匯出的 CSV）。
+ * 成功回傳 `{ text }`，失敗回傳 `{ error }`。
+ */
+export async function fetchText(url: string): Promise<{ text: string } | { error: string }> {
+  inflight.value++;
+  try {
+    let res: Response;
+    try {
+      res = await fetch(url, { credentials: "same-origin" });
+    } catch {
+      return { error: new ApiError(0, "network_error", "無法連線到伺服器，請確認網路後再試。").message };
+    }
+    if (!res.ok) return { error: (await decodeError(res)).message };
+    try {
+      return { text: await res.text() };
+    } catch {
+      return { error: "內容讀取失敗，請再試一次。" };
+    }
+  } finally {
+    inflight.value--;
+  }
+}
