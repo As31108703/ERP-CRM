@@ -111,7 +111,8 @@
                  ▼
 ┌─────────────────────────────────────────┐
 │ db（postgres:16-alpine）                │
-│  資料在 ./data/postgres，主機埠 5436    │
+│  資料在 ./data/postgres                 │
+│  主機埠 127.0.0.1:5436                  │
 │  schema 由 goose migration 管理         │
 └─────────────────────────────────────────┘
 ```
@@ -171,7 +172,7 @@ curl http://localhost:8080/api/health
 # {"name":"erpcrm","version":"0.1.0","simulation":true,"real_finance":false,"currency":"SIM"}
 ```
 
-對外的連接埠：前端 8080、後端 API 8000、PostgreSQL 5436。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
+連接埠：前端 8080 對所有網路介面開放；後端 API 8000 與 PostgreSQL 5436 只綁 `127.0.0.1`，供本機除錯與測試使用，區網其他機器連不到，對外一律經由前端的 nginx。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
 
 ## 環境變數
 
