@@ -21,8 +21,8 @@ class ServiceRow(SQLModel, table=True):
 
     __tablename__ = "service"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     case_id: uuid.UUID
     title: str
     source_case_title: str
@@ -42,6 +42,7 @@ class ServiceDeliveryRow(SQLModel, table=True):
 
     __tablename__ = "service_delivery"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     service_id: uuid.UUID
     revision: int = Field(sa_type=BigInteger)

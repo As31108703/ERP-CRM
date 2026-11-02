@@ -13,7 +13,7 @@ from src.modules.inventory.service import list_products, list_purchases, lots_of
 
 def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
     rows = list_products(db, workspace_id)
-    lots = lots_of(db, [p.id for p in rows])
+    lots = lots_of(db, workspace_id, [p.id for p in rows])
     products = [
         {
             "id": str(p.id),
@@ -80,7 +80,10 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         for lot in p.get("lots", []):
             db.add(
                 ProductLotRow(
-                    product_id=product_id, quantity=lot["quantity"], cost_minor=lot["cost_minor"]
+                    workspace_id=ws,
+                    product_id=product_id,
+                    quantity=lot["quantity"],
+                    cost_minor=lot["cost_minor"],
                 )
             )
             db.flush()

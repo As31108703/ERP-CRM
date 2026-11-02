@@ -40,7 +40,7 @@ def check_services(db: Session, workspace_id: str) -> None:
     for s in services:
         if s.paid_minor != paid.get(s.id, 0):
             raise _service_invalid("服務付款與流水不符")
-    deliveries = deliveries_of(db, [s.id for s in services])
+    deliveries = deliveries_of(db, workspace_id, [s.id for s in services])
     for s in services:
         check_int(s.amount_minor)
         check_int(s.paid_minor)

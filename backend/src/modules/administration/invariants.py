@@ -243,8 +243,7 @@ LIFECYCLE: dict[str, tuple[str, ...]] = {
 def _transitions(db: Session, wid: uuid.UUID) -> dict[uuid.UUID, list[AdmRequestTransition]]:
     stmt = (
         select(AdmRequestTransition)
-        .join(AdmRequest, AdmRequest.id == AdmRequestTransition.request_id)  # type: ignore[arg-type]
-        .where(AdmRequest.workspace_id == wid)
+        .where(AdmRequestTransition.workspace_id == wid)
         .order_by(AdmRequestTransition.request_id, AdmRequestTransition.seq)  # type: ignore[arg-type]
     )
     out: dict[uuid.UUID, list[AdmRequestTransition]] = defaultdict(list)

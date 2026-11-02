@@ -52,8 +52,8 @@ class WorkspaceRow(SQLModel, table=True):
 class HistoryRow(SQLModel, table=True):
     __tablename__ = "history"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     action: str
     result: str | None = None
     version: int

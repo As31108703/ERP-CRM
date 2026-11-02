@@ -23,8 +23,8 @@ class BomRow(SQLModel, table=True):
 
     __tablename__ = "bom"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     product_id: uuid.UUID
     revision: int = Field(sa_type=BigInteger)
     created_at: datetime = Field(sa_column=_tz())
@@ -36,6 +36,7 @@ class BomComponentRow(SQLModel, table=True):
 
     __tablename__ = "bom_component"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     bom_id: uuid.UUID = Field(primary_key=True)
     idx: int = Field(primary_key=True, sa_type=SmallInteger)
     product_id: uuid.UUID
@@ -47,8 +48,8 @@ class WorkOrderRow(SQLModel, table=True):
 
     __tablename__ = "work_order"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     learning_run_id: str | None = None
     bom_id: uuid.UUID
     bom_snapshot: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
@@ -66,6 +67,7 @@ class ConsumedMaterialLotRow(SQLModel, table=True):
     __tablename__ = "consumed_material_lot"
 
     id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
+    workspace_id: uuid.UUID
     work_order_id: uuid.UUID
     product_id: uuid.UUID
     quantity: int = Field(sa_type=BigInteger)

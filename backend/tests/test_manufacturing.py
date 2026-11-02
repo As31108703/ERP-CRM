@@ -865,8 +865,8 @@ _PLANNED = "(SELECT id FROM work_order WHERE status = 'planned')"
         ("DELETE FROM bom_component", "bom_invalid"),
         ("UPDATE bom_component SET product_id = (SELECT product_id FROM bom)", "bom_invalid"),
         (
-            "INSERT INTO bom_component (bom_id, idx, product_id, quantity)"
-            " SELECT bom_id, 1, product_id, 1 FROM bom_component",
+            "INSERT INTO bom_component (workspace_id, bom_id, idx, product_id, quantity)"
+            " SELECT workspace_id, bom_id, 1, product_id, 1 FROM bom_component",
             "bom_invalid",
         ),
         (
@@ -874,8 +874,9 @@ _PLANNED = "(SELECT id FROM work_order WHERE status = 'planned')"
             "INSERT INTO bom (id, workspace_id, product_id, revision, created_at)"
             " SELECT gen_random_uuid(), workspace_id, (SELECT product_id FROM bom_component),"
             " 1, now() FROM bom;"
-            " INSERT INTO bom_component (bom_id, idx, product_id, quantity)"
-            " SELECT b.id, 0, (SELECT product_id FROM bom WHERE revision = 1 ORDER BY seq LIMIT 1),"
+            " INSERT INTO bom_component (workspace_id, bom_id, idx, product_id, quantity)"
+            " SELECT b.workspace_id, b.id, 0,"
+            " (SELECT product_id FROM bom WHERE revision = 1 ORDER BY seq LIMIT 1),"
             " 1 FROM bom b WHERE b.seq = (SELECT max(seq) FROM bom)",
             "bom_cycle",
         ),

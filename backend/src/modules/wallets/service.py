@@ -16,7 +16,7 @@ from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import Template
 from src.modules.wallets.entity import SYSTEM_KINDS, LedgerEntryRow, LedgerRow, WalletRow
 from src.platform.context import CommandContext
-from src.platform.records import check_safe, parse_id, record_missing
+from src.platform.records import check_safe, parse_id, record_missing, scoped_get
 
 DEMO_BUYER_NAME = "示範買家"
 FUNDABLE_KINDS = ("buyer", "business")
@@ -53,7 +53,10 @@ def load_ledger(
     if ledgers:
         stmt = (
             select(LedgerEntryRow)
-            .where(LedgerEntryRow.ledger_id.in_(list(entries)))  # type: ignore[attr-defined]
+            .where(
+                LedgerEntryRow.workspace_id == uuid.UUID(workspace_id),
+                LedgerEntryRow.ledger_id.in_(list(entries)),  # type: ignore[attr-defined]
+            )
             .order_by(LedgerEntryRow.ledger_id, LedgerEntryRow.idx)  # type: ignore[arg-type]
         )
         for e in db.exec(stmt):
@@ -63,9 +66,8 @@ def load_ledger(
 
 def get_wallet(ctx: CommandContext, wallet_id: object) -> WalletRow:
     """工作區內的錢包；不存在時 404 simulation_record_missing。"""
-    parsed = parse_id(wallet_id)
-    row = ctx.db.get(WalletRow, parsed) if parsed is not None else None
-    if row is None or row.workspace_id != _ws(ctx):
+    row = scoped_get(ctx.db, WalletRow, ctx.workspace_id, wallet_id)
+    if row is None:
         raise record_missing()
     return row
 
@@ -153,10 +155,16 @@ def move(
         )
     )
     ctx.db.flush()
-    ctx.db.add(
-        LedgerEntryRow(ledger_id=ledger_id, idx=0, wallet_id=source.id, amount_minor=-amount)
-    )
-    ctx.db.add(LedgerEntryRow(ledger_id=ledger_id, idx=1, wallet_id=target.id, amount_minor=amount))
+    for idx, (wallet, signed) in enumerate(((source, -amount), (target, amount))):
+        ctx.db.add(
+            LedgerEntryRow(
+                workspace_id=_ws(ctx),
+                ledger_id=ledger_id,
+                idx=idx,
+                wallet_id=wallet.id,
+                amount_minor=signed,
+            )
+        )
     ctx.db.flush()
     return str(ledger_id)
 
@@ -255,7 +263,11 @@ def credits_by_reference(db: Session, workspace_id: str, kind: str) -> dict[uuid
             LedgerEntryRow.wallet_id,
             LedgerEntryRow.amount_minor,
         )
-        .join(LedgerEntryRow, LedgerEntryRow.ledger_id == LedgerRow.id)  # type: ignore[arg-type]
+        .join(
+            LedgerEntryRow,
+            (LedgerEntryRow.workspace_id == LedgerRow.workspace_id)  # type: ignore[arg-type]
+            & (LedgerEntryRow.ledger_id == LedgerRow.id),
+        )
         .where(LedgerRow.workspace_id == uuid.UUID(workspace_id), LedgerRow.kind == kind)
         .order_by(LedgerRow.id, LedgerEntryRow.idx)  # type: ignore[arg-type]
     )

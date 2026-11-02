@@ -91,7 +91,10 @@ def load_world(db: Session, workspace: WorkspaceRow, versions: Iterable[int] = (
 def load_run(db: Session, session: LearningSessionRow) -> Run:
     stmt = (
         select(LearningCheckpointRow)
-        .where(LearningCheckpointRow.session_id == session.id)
+        .where(
+            LearningCheckpointRow.workspace_id == session.workspace_id,
+            LearningCheckpointRow.session_id == session.id,
+        )
         .order_by(LearningCheckpointRow.version)  # type: ignore[arg-type]
     )
     checkpoints = [

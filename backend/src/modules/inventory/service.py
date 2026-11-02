@@ -18,7 +18,7 @@ from src.modules.inventory.entity import ProductLotRow, ProductRow, PurchaseRow
 from src.modules.wallets import service as wallets
 from src.modules.wallets.service import LedgerView, ledger_invalid, register_ledger_rule
 from src.platform.context import CommandContext
-from src.platform.records import PRODUCT_NAME_MAX, check_safe, parse_id, record_missing
+from src.platform.records import PRODUCT_NAME_MAX, check_safe, record_missing, scoped_get
 
 COMPONENT_SKU = "MAT-001"
 COMPONENT_PRICE = 1000
@@ -50,13 +50,18 @@ def list_purchases(db: Session, workspace_id: str) -> list[PurchaseRow]:
     return list(db.exec(stmt))
 
 
-def lots_of(db: Session, product_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ProductLotRow]]:
-    """各商品的成本層，依 FIFO 順序（id 由小到大）。"""
+def lots_of(
+    db: Session, workspace_id: str, product_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[ProductLotRow]]:
+    """工作區內各商品的成本層，依 FIFO 順序（id 由小到大）。"""
     out: dict[uuid.UUID, list[ProductLotRow]] = {pid: [] for pid in product_ids}
     if product_ids:
         stmt = (
             select(ProductLotRow)
-            .where(ProductLotRow.product_id.in_(product_ids))  # type: ignore[attr-defined]
+            .where(
+                ProductLotRow.workspace_id == uuid.UUID(workspace_id),
+                ProductLotRow.product_id.in_(product_ids),  # type: ignore[attr-defined]
+            )
             .order_by(ProductLotRow.id)  # type: ignore[arg-type]
         )
         for lot in db.exec(stmt):
@@ -66,9 +71,8 @@ def lots_of(db: Session, product_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[P
 
 def get_product(ctx: CommandContext, product_id: object) -> ProductRow:
     """工作區內的商品；不存在時 404 simulation_record_missing。"""
-    parsed = parse_id(product_id)
-    row = ctx.db.get(ProductRow, parsed) if parsed is not None else None
-    if row is None or row.workspace_id != _ws(ctx):
+    row = scoped_get(ctx.db, ProductRow, ctx.workspace_id, product_id)
+    if row is None:
         raise record_missing()
     return row
 
@@ -86,7 +90,14 @@ def push_lot(ctx: CommandContext, product_id: object, quantity: int, cost_minor:
         product.stock_value_minor + check_safe(quantity * cost_minor)
     )
     product.updated_at = ctx.now
-    ctx.db.add(ProductLotRow(product_id=product.id, quantity=quantity, cost_minor=cost_minor))
+    ctx.db.add(
+        ProductLotRow(
+            workspace_id=product.workspace_id,
+            product_id=product.id,
+            quantity=quantity,
+            cost_minor=cost_minor,
+        )
+    )
     ctx.db.flush()
 
 
@@ -104,7 +115,7 @@ def consume_fifo(
     """
     quantity = check_int(quantity, min_=1)
     product = get_product(ctx, product_id)
-    lots = lots_of(ctx.db, [product.id])[product.id]
+    lots = lots_of(ctx.db, ctx.workspace_id, [product.id])[product.id]
     ensure(sum(lot.quantity for lot in lots) >= quantity, 409, corrupt_code, message)
     taken: list[tuple[int, int]] = []
     remaining = quantity
@@ -288,8 +299,8 @@ def _receive_rule(
     db: Session, workspace_id: str, ledger: LedgerView
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """inventory.receive：商家 → 供應商，金額等於所指採購的總額。"""
-    purchase = db.get(PurchaseRow, ledger.reference_id)
-    if purchase is None or str(purchase.workspace_id) != workspace_id:
+    purchase = scoped_get(db, PurchaseRow, workspace_id, ledger.reference_id)
+    if purchase is None:
         raise Problem(404, "record_missing", "找不到工作區紀錄")
     if ledger.credit != purchase.total_minor:
         raise ledger_invalid("進貨流水不符")

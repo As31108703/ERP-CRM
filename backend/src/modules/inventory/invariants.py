@@ -15,7 +15,7 @@ def check_products(db: Session, workspace_id: str) -> None:
     reserved ≤ on_hand（stock_invalid）；名稱 1..100 字（product_invalid）。"""
     check_record_limit(db, ProductRow, workspace_id)
     products = list_products(db, workspace_id)
-    lots = lots_of(db, [p.id for p in products])
+    lots = lots_of(db, workspace_id, [p.id for p in products])
     for p in products:
         for n in (p.on_hand, p.reserved, p.stock_value_minor, p.price_minor, p.cost_minor):
             check_int(n)

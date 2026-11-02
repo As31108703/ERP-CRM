@@ -21,6 +21,9 @@ ORDERS = "/api/v1/sales/orders"
 BOMS = "/api/v1/manufacturing/boms"
 WORK_ORDERS = "/api/v1/manufacturing/work-orders"
 ADMIN = "/api/v1/administration"
+CRM = "/api/v1/crm"
+QUOTES = "/api/v1/crm/quotes"
+SERVICES = "/api/v1/services"
 WEEK = "2026-11-02"
 MISSING = "00000000-0000-4000-8000-000000000000"
 
@@ -151,6 +154,140 @@ def test_import_replaces_other_workspace(api: ApiClient) -> None:
     r = _import(api, backup)
     assert r.status_code == 200, r.text
     assert _without_generation(api.snapshot()) == _without_generation(source)
+
+
+def _demo_world_with_crm(api: ApiClient) -> dict[str, str]:
+    """`_demo_world` 再加上已發出的報價與已交付的服務（摘要都含 id），回傳各類紀錄的 id。"""
+    _demo_world(api)
+    ws = api.snapshot()
+    case = ws["cases"][0]["id"]
+    quote = api.ok(
+        "POST",
+        QUOTES,
+        {"case_id": case, "amount_minor": 5000, "expires_at": "2099-01-01T00:00:00Z"},
+    )["result"]
+    api.ok("POST", f"{QUOTES}/{quote}/issue", {})
+    service = ws["services"][0]["id"]
+    api.ok("POST", f"{SERVICES}/{service}/confirm", {})
+    api.ok("POST", f"{SERVICES}/{service}/deliver", {"artifact_ref": "v1"})
+    ws = api.snapshot()
+    return {
+        "product": next(p for p in ws["products"] if p["sku"] == "T-001")["id"],
+        "buyer": _wallet(ws, "buyer")["id"],
+        "order": ws["orders"][0]["id"],
+        "case": case,
+        "deal": ws["deals"][0]["id"],
+        "quote": quote,
+        "service": service,
+        "bom": ws["boms"][-1]["id"],
+        "work_order": ws["work_orders"][0]["id"],
+        "unit": ws["administration"]["units"][0]["id"],
+    }
+
+
+def test_import_same_backup_into_two_sessions(api: ApiClient, make_client) -> None:
+    """同一份備份可以匯入多個工作區（例如老師把一份備份發給全班）：紀錄 id 以工作區為範圍，
+    匯入後各自操作互不影響。"""
+    ids = _demo_world_with_crm(api)
+    source = api.snapshot()
+    backup = _export(api)
+
+    other = ApiClient(make_client())
+    r = _import(other, backup)
+    assert r.status_code == 200, r.text
+    imported = other.snapshot()
+    assert _without_generation(imported) == _without_generation(source)
+    assert api.snapshot() == source
+
+    # 已有工作區的第三個 session 匯入同一份備份，以及原 session 再匯入自己的備份也都成功
+    third = ApiClient(make_client())
+    third.setup("retail", company="另一家店")
+    assert _import(third, backup).status_code == 200
+    assert _without_generation(third.snapshot()) == _without_generation(source)
+    assert _import(api, backup).status_code == 200
+    source = api.snapshot()
+
+    # B 對匯入的 id 下命令：只改到 B 自己的紀錄
+    other.ok("PATCH", f"{PRODUCTS}/{ids['product']}", {"name": "乙班商品"})
+    other.ok("POST", f"/api/v1/wallets/{ids['buyer']}/fund", {"amount_minor": 10})
+    other.ok("PATCH", f"{CRM}/cases/{ids['case']}", {"title": "乙班案件"})
+    other.ok("POST", f"{CRM}/deals/{ids['deal']}/followups", {"note": "乙班跟進"})
+    digest = next(q for q in imported["quotes"] if q["id"] == ids["quote"])["digest"]
+    other.ok("POST", f"{QUOTES}/{ids['quote']}/confirm", {"digest": digest})
+    delivery = next(s for s in imported["services"] if s["id"] == ids["service"])["deliveries"][0]
+    other.ok(
+        "POST",
+        f"{SERVICES}/{ids['service']}/accept",
+        {"delivery_id": delivery["id"], "digest": delivery["digest"]},
+    )
+    other.ok("POST", WORK_ORDERS, {"bom_id": ids["bom"], "quantity": 1})
+    other.ok("PATCH", f"{ADMIN}/units/{ids['unit']}", {"name": "乙班單位"})
+
+    changed = other.snapshot()
+    assert next(p for p in changed["products"] if p["id"] == ids["product"])["name"] == "乙班商品"
+    assert next(c for c in changed["cases"] if c["id"] == ids["case"])["title"] == "乙班案件"
+    assert next(q for q in changed["quotes"] if q["id"] == ids["quote"])["status"] == (
+        "simulated_confirmed"
+    )
+    assert next(s for s in changed["services"] if s["id"] == ids["service"])["status"] == (
+        "accepted"
+    )
+    assert len(changed["work_orders"]) == len(source["work_orders"]) + 1
+    # 原 session 與第三個 session 的資料都沒有被 B 的命令改到
+    assert api.snapshot() == source
+    assert _without_generation(third.snapshot()) == _without_generation(imported)
+
+
+def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> None:
+    """其他工作區的 id 一律視為不存在（404），不會 500，也不會讀到或改到其他工作區的資料。
+    每個以 id 取得紀錄的共用查詢至少各測一個命令。"""
+    ids = _demo_world_with_crm(api)
+    source = api.snapshot()
+    other = ApiClient(make_client())
+    other.setup("general", company="另一家店")
+    own = other.snapshot()
+    own_buyer = _wallet(own, "buyer")["id"]
+    own_product = own["products"][0]["id"]
+
+    order_body = {
+        "buyer_wallet_id": own_buyer,
+        "lines": [{"product_id": ids["product"], "quantity": 1}],
+    }
+    bom_body = {
+        "product_id": own_product,
+        "components": [{"product_id": ids["product"], "quantity": 1}],
+    }
+    attempts = [
+        # inventory.get_product
+        ("PATCH", f"{PRODUCTS}/{ids['product']}", {"name": "x"}, "simulation_record_missing"),
+        ("POST", ORDERS, order_body, "simulation_record_missing"),
+        # wallets.get_wallet
+        (
+            "POST",
+            f"/api/v1/wallets/{ids['buyer']}/fund",
+            {"amount_minor": 1},
+            "simulation_record_missing",
+        ),
+        # sales.get_order
+        ("POST", f"{ORDERS}/{ids['order']}/cancel", {}, "simulation_record_missing"),
+        # records.find_record
+        ("PATCH", f"{CRM}/cases/{ids['case']}", {"title": "x"}, "record_missing"),
+        ("POST", f"{CRM}/deals/{ids['deal']}/followups", {"note": "x"}, "record_missing"),
+        # crm 報價
+        ("POST", f"{QUOTES}/{ids['quote']}/issue", {}, "record_missing"),
+        # services.get_service
+        ("POST", f"{SERVICES}/{ids['service']}/confirm", {}, "simulation_record_missing"),
+        # manufacturing 的商品、BOM、工單
+        ("POST", BOMS, bom_body, "record_missing"),
+        ("POST", WORK_ORDERS, {"bom_id": ids["bom"], "quantity": 1}, "record_missing"),
+        ("POST", f"{WORK_ORDERS}/{ids['work_order']}/cancel", {}, "record_missing"),
+        # administration.row_by_id
+        ("PATCH", f"{ADMIN}/units/{ids['unit']}", {"name": "x"}, "office_record_missing"),
+    ]
+    for method, path, body, code in attempts:
+        assert _error(other.mutate(method, path, body)) == (404, code), path
+    assert other.snapshot() == own
+    assert api.snapshot() == source
 
 
 def test_import_without_existing_workspace(api: ApiClient) -> None:

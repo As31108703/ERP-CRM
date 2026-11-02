@@ -10,7 +10,7 @@ from src.core.money import check_int
 from src.core.problem import Problem, ensure
 from src.modules.inventory import service as inventory
 from src.modules.inventory.service import list_products, list_purchases
-from src.modules.sales.entity import OrderLineRow, SalesOrderRow, ShippedCostLotRow
+from src.modules.sales.entity import SalesOrderRow, ShippedCostLotRow
 from src.modules.sales.service import CANCELLED, STATUSES, cost_lots_of, lines_of, list_orders
 from src.modules.wallets.service import credits_by_reference, list_wallets
 from src.platform.records import LEARNING_ID_RE, LINES_MAX, check_record_limit
@@ -38,8 +38,8 @@ def check_orders(db: Session, workspace_id: str) -> None:
     orders = list_orders(db, workspace_id)
     wallet_ids = {w.id for w in list_wallets(db, workspace_id)}
     product_ids = {p.id for p in list_products(db, workspace_id)}
-    lines = lines_of(db, [o.id for o in orders])
-    lots = cost_lots_of(db, [line.id for rows in lines.values() for line in rows])
+    lines = lines_of(db, workspace_id, [o.id for o in orders])
+    lots = cost_lots_of(db, workspace_id, [line.id for rows in lines.values() for line in rows])
     paid = credits_by_reference(db, workspace_id, "order.pay")
     cancelled = credits_by_reference(db, workspace_id, "order.cancel")
     returned = credits_by_reference(db, workspace_id, "order.return")
@@ -125,9 +125,8 @@ def _unreturned_shipped_cost(db: Session, workspace_id: str) -> int:
                 0,
             )
         )
-        .join(OrderLineRow, OrderLineRow.id == ShippedCostLotRow.line_id)  # type: ignore[arg-type]
-        .join(SalesOrderRow, SalesOrderRow.id == OrderLineRow.order_id)  # type: ignore[arg-type]
-        .where(SalesOrderRow.workspace_id == uuid.UUID(workspace_id))
+        # 出貨成本批次以複合外鍵屬於同一工作區的品項，直接以 workspace_id 篩選
+        .where(ShippedCostLotRow.workspace_id == uuid.UUID(workspace_id))
     )
     return int(db.execute(stmt).scalar_one())
 

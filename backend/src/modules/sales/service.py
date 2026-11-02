@@ -19,7 +19,7 @@ from src.modules.sales.entity import OrderLineRow, SalesOrderRow, ShippedCostLot
 from src.modules.wallets import service as wallets
 from src.modules.wallets.service import LedgerView, register_ledger_rule
 from src.platform.context import CommandContext
-from src.platform.records import check_safe, parse_id, record_missing
+from src.platform.records import check_safe, parse_id, record_missing, scoped_get
 
 STATUSES = (
     "pending",
@@ -52,13 +52,18 @@ def list_orders(db: Session, workspace_id: str) -> list[SalesOrderRow]:
     return list(db.exec(stmt))
 
 
-def lines_of(db: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[OrderLineRow]]:
-    """各訂單的品項，依 idx 排序。"""
+def lines_of(
+    db: Session, workspace_id: str, order_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[OrderLineRow]]:
+    """工作區內各訂單的品項，依 idx 排序。"""
     out: dict[uuid.UUID, list[OrderLineRow]] = {oid: [] for oid in order_ids}
     if order_ids:
         stmt = (
             select(OrderLineRow)
-            .where(OrderLineRow.order_id.in_(order_ids))  # type: ignore[attr-defined]
+            .where(
+                OrderLineRow.workspace_id == uuid.UUID(workspace_id),
+                OrderLineRow.order_id.in_(order_ids),  # type: ignore[attr-defined]
+            )
             .order_by(OrderLineRow.order_id, OrderLineRow.idx)  # type: ignore[arg-type]
         )
         for line in db.exec(stmt):
@@ -67,14 +72,17 @@ def lines_of(db: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Or
 
 
 def cost_lots_of(
-    db: Session, line_ids: list[uuid.UUID]
+    db: Session, workspace_id: str, line_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[ShippedCostLotRow]]:
-    """各品項的出貨成本批次，依出貨順序（id 由小到大）。"""
+    """工作區內各品項的出貨成本批次，依出貨順序（id 由小到大）。"""
     out: dict[uuid.UUID, list[ShippedCostLotRow]] = {lid: [] for lid in line_ids}
     if line_ids:
         stmt = (
             select(ShippedCostLotRow)
-            .where(ShippedCostLotRow.line_id.in_(line_ids))  # type: ignore[attr-defined]
+            .where(
+                ShippedCostLotRow.workspace_id == uuid.UUID(workspace_id),
+                ShippedCostLotRow.line_id.in_(line_ids),  # type: ignore[attr-defined]
+            )
             .order_by(ShippedCostLotRow.id)  # type: ignore[arg-type]
         )
         for lot in db.exec(stmt):
@@ -84,9 +92,8 @@ def cost_lots_of(
 
 def get_order(ctx: CommandContext, order_id: object) -> SalesOrderRow:
     """工作區內的訂單；不存在時 404 simulation_record_missing。"""
-    parsed = parse_id(order_id)
-    row = ctx.db.get(SalesOrderRow, parsed) if parsed is not None else None
-    if row is None or row.workspace_id != _ws(ctx):
+    row = scoped_get(ctx.db, SalesOrderRow, ctx.workspace_id, order_id)
+    if row is None:
         raise record_missing()
     return row
 
@@ -98,7 +105,11 @@ def order_reserved_demand(db: Session, workspace_id: str) -> dict[str, int]:
             OrderLineRow.product_id,
             func.sum(OrderLineRow.quantity - OrderLineRow.shipped_quantity),
         )
-        .join(SalesOrderRow, SalesOrderRow.id == OrderLineRow.order_id)  # type: ignore[arg-type]
+        .join(
+            SalesOrderRow,
+            (SalesOrderRow.workspace_id == OrderLineRow.workspace_id)  # type: ignore[arg-type]
+            & (SalesOrderRow.id == OrderLineRow.order_id),
+        )
         .where(
             SalesOrderRow.workspace_id == uuid.UUID(workspace_id),
             SalesOrderRow.status != CANCELLED,
@@ -198,6 +209,7 @@ def create_order(ctx: CommandContext, p: dict[str, Any]) -> str:
         total = check_safe(total + check_safe(product.price_minor * quantity))
         rows.append(
             OrderLineRow(
+                workspace_id=order.workspace_id,
                 order_id=order.id,
                 idx=idx,
                 product_id=product.id,
@@ -219,7 +231,7 @@ def create_order(ctx: CommandContext, p: dict[str, Any]) -> str:
 def pay_order(ctx: CommandContext, p: dict[str, Any]) -> str:
     """`order.pay {id, amount_minor}`：出貨前分次付款，不得超過訂單總額。"""
     order = _open_order(ctx, p)
-    lines = lines_of(ctx.db, [order.id])[order.id]
+    lines = lines_of(ctx.db, ctx.workspace_id, [order.id])[order.id]
     ensure(not _any_shipped(lines), 409, "simulation_order_shipped", "出貨後不能再付款。")
     amount = check_int(p.get("amount_minor"), min_=1)
     ensure(
@@ -240,7 +252,7 @@ def pay_order(ctx: CommandContext, p: dict[str, Any]) -> str:
 def cancel_order(ctx: CommandContext, p: dict[str, Any]) -> str:
     """`order.cancel {id}`：未出貨才能取消；退回全部已付金額（0 也寫流水）並釋放預留。"""
     order = _open_order(ctx, p)
-    lines = lines_of(ctx.db, [order.id])[order.id]
+    lines = lines_of(ctx.db, ctx.workspace_id, [order.id])[order.id]
     ensure(not _any_shipped(lines), 409, "simulation_order_shipped", "出貨後請使用退貨。")
     buyer, business = _buyer_and_business(ctx, order)
     wallets.move(ctx, "order.cancel", business, buyer, order.paid_minor, str(order.id))
@@ -265,7 +277,7 @@ def ship_order(ctx: CommandContext, p: dict[str, Any]) -> str:
         "simulation_payment_required",
         "全額模擬付款後才能出貨。",
     )
-    lines = lines_of(ctx.db, [order.id])[order.id]
+    lines = lines_of(ctx.db, ctx.workspace_id, [order.id])[order.id]
     for line, n in _selections(lines, p):
         ensure(
             line.shipped_quantity + n <= line.quantity,
@@ -285,7 +297,14 @@ def ship_order(ctx: CommandContext, p: dict[str, Any]) -> str:
             ctx, product.id, n, corrupt_code=_CORRUPT, message="模擬庫存成本層不足。"
         )
         for quantity, cost_minor in taken:
-            ctx.db.add(ShippedCostLotRow(line_id=line.id, quantity=quantity, cost_minor=cost_minor))
+            ctx.db.add(
+                ShippedCostLotRow(
+                    workspace_id=line.workspace_id,
+                    line_id=line.id,
+                    quantity=quantity,
+                    cost_minor=cost_minor,
+                )
+            )
             ctx.db.flush()
         line.shipped_quantity += n
     order.status = (
@@ -304,7 +323,7 @@ def return_order(ctx: CommandContext, p: dict[str, Any]) -> str:
     依出貨順序走訪出貨成本批次，退回的件數以新的成本層接在商品 FIFO 佇列尾端。
     """
     order = _open_order(ctx, p)
-    lines = lines_of(ctx.db, [order.id])[order.id]
+    lines = lines_of(ctx.db, ctx.workspace_id, [order.id])[order.id]
     selected = _selections(lines, p)
     refund = 0
     for line, n in selected:
@@ -323,7 +342,7 @@ def return_order(ctx: CommandContext, p: dict[str, Any]) -> str:
     )
     buyer, business = _buyer_and_business(ctx, order)
     wallets.move(ctx, "order.return", business, buyer, refund, str(order.id))
-    cost_lots = cost_lots_of(ctx.db, [line.id for line, _ in selected])
+    cost_lots = cost_lots_of(ctx.db, ctx.workspace_id, [line.id for line, _ in selected])
     for line, n in selected:
         remaining = n
         for lot in cost_lots[line.id]:
@@ -352,8 +371,8 @@ def return_order(ctx: CommandContext, p: dict[str, Any]) -> str:
 
 def _order_rule(db: Session, workspace_id: str, ledger: LedgerView) -> tuple[uuid.UUID, uuid.UUID]:
     """order.pay：買家 → 商家；order.cancel、order.return：商家 → 買家（訂單的買家錢包）。"""
-    order = db.get(SalesOrderRow, ledger.reference_id)
-    if order is None or str(order.workspace_id) != workspace_id:
+    order = scoped_get(db, SalesOrderRow, workspace_id, ledger.reference_id)
+    if order is None:
         raise Problem(404, "record_missing", "找不到工作區紀錄")
     business = ledger.system["business"].id
     if ledger.kind == "order.pay":

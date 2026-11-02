@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlmodel import Session
+from sqlmodel import Session, SQLModel
 
 from src.core.money import check_int
 from src.core.problem import Problem, ensure
@@ -144,6 +144,25 @@ def parse_id(value: object) -> uuid.UUID | None:
         return None
 
 
+def scoped_get[T: SQLModel](
+    db: Session,
+    model: type[T],
+    workspace_id: str | uuid.UUID,
+    record_id: object,
+    *,
+    lock: bool = False,
+) -> T | None:
+    """以工作區範圍的主鍵 (workspace_id, id) 取得資料列；id 格式不符或不存在時回 None。
+
+    業務資料的 id 只在工作區內唯一（同一份備份可匯入多個工作區），所以一律帶著工作區查詢，
+    其他工作區的同 id 資料視為不存在，不會跨工作區讀到或洩漏。"""
+    parsed = parse_id(record_id)
+    if parsed is None:
+        return None
+    ws = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(workspace_id)
+    return db.get(model, {"workspace_id": ws, "id": parsed}, with_for_update=lock or None)
+
+
 def record_missing(code: str = "simulation_record_missing") -> Problem:
     return Problem(404, code, "找不到這個模擬世界的紀錄。")
 
@@ -213,9 +232,8 @@ def _fields_invalid() -> Problem:
 
 def find_record(ctx: CommandContext, collection: str, record_id: object) -> CrmRecordRow:
     """工作區內指定集合的紀錄；不存在（或屬於其他集合）時 404 record_missing。"""
-    parsed = parse_id(record_id)
-    row = ctx.db.get(CrmRecordRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id or row.collection != collection:
+    row = scoped_get(ctx.db, CrmRecordRow, ctx.workspace_id, record_id)
+    if row is None or row.collection != collection:
         raise crm_record_missing()
     return row
 

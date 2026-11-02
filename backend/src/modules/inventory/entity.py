@@ -19,8 +19,8 @@ def _seq() -> Column:  # type: ignore[type-arg]
 class ProductRow(SQLModel, table=True):
     __tablename__ = "product"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     sku: str
     name: str
     price_minor: int = Field(sa_type=BigInteger)
@@ -40,6 +40,7 @@ class ProductLotRow(SQLModel, table=True):
     __tablename__ = "product_lot"
 
     id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
+    workspace_id: uuid.UUID
     product_id: uuid.UUID
     quantity: int = Field(sa_type=BigInteger)
     cost_minor: int = Field(sa_type=BigInteger)
@@ -48,8 +49,8 @@ class ProductLotRow(SQLModel, table=True):
 class PurchaseRow(SQLModel, table=True):
     __tablename__ = "purchase"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     product_id: uuid.UUID
     name: str
     quantity: int = Field(sa_type=BigInteger)

@@ -18,8 +18,8 @@ class LearningSessionRow(SQLModel, table=True):
 
     __tablename__ = "learning_session"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    workspace_id: uuid.UUID
     path: str
     run_id: str
     active: bool = False
@@ -40,6 +40,7 @@ class LearningCheckpointRow(SQLModel, table=True):
 
     __tablename__ = "learning_checkpoint"
 
+    workspace_id: uuid.UUID = Field(primary_key=True)
     session_id: uuid.UUID = Field(primary_key=True)
     step_id: str = Field(primary_key=True)
     action: str

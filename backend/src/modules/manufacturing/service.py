@@ -27,7 +27,7 @@ from src.modules.manufacturing.entity import (
     WorkOrderRow,
 )
 from src.platform.context import CommandContext
-from src.platform.records import crm_record_missing, parse_id
+from src.platform.records import crm_record_missing, scoped_get
 
 PLANNED = "planned"
 RESERVED = "reserved"
@@ -51,13 +51,18 @@ def list_boms(db: Session, workspace_id: str) -> list[BomRow]:
     return list(db.exec(stmt))
 
 
-def components_of(db: Session, bom_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[BomComponentRow]]:
-    """各 BOM 的材料，依 idx 排序。"""
+def components_of(
+    db: Session, workspace_id: str, bom_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[BomComponentRow]]:
+    """工作區內各 BOM 的材料，依 idx 排序。"""
     out: dict[uuid.UUID, list[BomComponentRow]] = {bid: [] for bid in bom_ids}
     if bom_ids:
         stmt = (
             select(BomComponentRow)
-            .where(BomComponentRow.bom_id.in_(bom_ids))  # type: ignore[attr-defined]
+            .where(
+                BomComponentRow.workspace_id == uuid.UUID(workspace_id),
+                BomComponentRow.bom_id.in_(bom_ids),  # type: ignore[attr-defined]
+            )
             .order_by(BomComponentRow.bom_id, BomComponentRow.idx)  # type: ignore[arg-type]
         )
         for c in db.exec(stmt):
@@ -75,14 +80,17 @@ def list_work_orders(db: Session, workspace_id: str) -> list[WorkOrderRow]:
 
 
 def consumed_lots_of(
-    db: Session, work_order_ids: list[uuid.UUID]
+    db: Session, workspace_id: str, work_order_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[ConsumedMaterialLotRow]]:
-    """各工單的耗料成本層，依耗用順序。"""
+    """工作區內各工單的耗料成本層，依耗用順序。"""
     out: dict[uuid.UUID, list[ConsumedMaterialLotRow]] = {wid: [] for wid in work_order_ids}
     if work_order_ids:
         stmt = (
             select(ConsumedMaterialLotRow)
-            .where(ConsumedMaterialLotRow.work_order_id.in_(work_order_ids))  # type: ignore[attr-defined]
+            .where(
+                ConsumedMaterialLotRow.workspace_id == uuid.UUID(workspace_id),
+                ConsumedMaterialLotRow.work_order_id.in_(work_order_ids),  # type: ignore[attr-defined]
+            )
             .order_by(ConsumedMaterialLotRow.id)  # type: ignore[arg-type]
         )
         for lot in db.exec(stmt):
@@ -141,27 +149,24 @@ def has_cycle(edges: Mapping[Any, Iterable[Any]]) -> bool:
 
 def _product(ctx: CommandContext, product_id: object) -> ProductRow:
     """工作區內的商品；不存在時 404 record_missing。"""
-    parsed = parse_id(product_id)
-    row = ctx.db.get(ProductRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id:
+    row = scoped_get(ctx.db, ProductRow, ctx.workspace_id, product_id)
+    if row is None:
         raise crm_record_missing()
     return row
 
 
 def get_bom(ctx: CommandContext, bom_id: object) -> BomRow:
     """工作區內的 BOM；不存在時 404 record_missing。"""
-    parsed = parse_id(bom_id)
-    row = ctx.db.get(BomRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id:
+    row = scoped_get(ctx.db, BomRow, ctx.workspace_id, bom_id)
+    if row is None:
         raise crm_record_missing()
     return row
 
 
 def get_work_order(ctx: CommandContext, work_order_id: object) -> WorkOrderRow:
     """工作區內的工單；不存在時 404 record_missing。"""
-    parsed = parse_id(work_order_id)
-    row = ctx.db.get(WorkOrderRow, parsed) if parsed is not None else None
-    if row is None or str(row.workspace_id) != ctx.workspace_id:
+    row = scoped_get(ctx.db, WorkOrderRow, ctx.workspace_id, work_order_id)
+    if row is None:
         raise crm_record_missing()
     return row
 
@@ -199,7 +204,13 @@ def _new_bom(
     ctx.db.flush()
     for idx, (component_id, quantity) in enumerate(components):
         ctx.db.add(
-            BomComponentRow(bom_id=bom.id, idx=idx, product_id=component_id, quantity=quantity)
+            BomComponentRow(
+                workspace_id=bom.workspace_id,
+                bom_id=bom.id,
+                idx=idx,
+                product_id=component_id,
+                quantity=quantity,
+            )
         )
     ctx.db.flush()
     return str(bom.id)
@@ -232,7 +243,7 @@ def create_bom(ctx: CommandContext, p: dict[str, Any]) -> str:
         seen.add(material.id)
         components.append((material.id, quantity))
     boms = list_boms(ctx.db, ctx.workspace_id)
-    existing = components_of(ctx.db, [b.id for b in boms])
+    existing = components_of(ctx.db, ctx.workspace_id, [b.id for b in boms])
     # 依建立順序覆寫，留下每個成品最新版本的邊
     edges: dict[uuid.UUID, list[uuid.UUID]] = {
         b.product_id: [c.product_id for c in existing[b.id]] for b in boms
@@ -246,7 +257,7 @@ def create_work_order(ctx: CommandContext, p: dict[str, Any]) -> str:
     """`workOrder.create {bom_id, quantity, learning_run_id?}`：保存 BOM 複本，狀態 planned。"""
     bom = get_bom(ctx, p.get("bom_id"))
     quantity = check_int(p.get("quantity"), min_=1)
-    snapshot = bom_json(bom, components_of(ctx.db, [bom.id])[bom.id])
+    snapshot = bom_json(bom, components_of(ctx.db, ctx.workspace_id, [bom.id])[bom.id])
     row = WorkOrderRow(
         workspace_id=uuid.UUID(ctx.workspace_id),
         learning_run_id=p.get("learning_run_id") or None,
@@ -308,6 +319,7 @@ def complete_work_order(ctx: CommandContext, p: dict[str, Any]) -> str:
         for quantity, unit_cost in taken:
             ctx.db.add(
                 ConsumedMaterialLotRow(
+                    workspace_id=wo.workspace_id,
                     work_order_id=wo.id,
                     product_id=uuid.UUID(product_id),
                     quantity=quantity,

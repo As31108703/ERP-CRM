@@ -25,9 +25,9 @@ from src.modules.manufacturing.service import (
 
 def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
     boms = list_boms(db, workspace_id)
-    components = components_of(db, [b.id for b in boms])
+    components = components_of(db, workspace_id, [b.id for b in boms])
     orders = list_work_orders(db, workspace_id)
-    lots = consumed_lots_of(db, [o.id for o in orders])
+    lots = consumed_lots_of(db, workspace_id, [o.id for o in orders])
     work_orders = [
         {
             "id": str(o.id),
@@ -80,6 +80,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         for idx, c in enumerate(b["components"]):
             db.add(
                 BomComponentRow(
+                    workspace_id=ws,
                     bom_id=bom_id,
                     idx=idx,
                     product_id=uuid.UUID(c["product_id"]),
@@ -108,6 +109,7 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         for lot in o.get("consumed_material_lots", []):
             db.add(
                 ConsumedMaterialLotRow(
+                    workspace_id=ws,
                     work_order_id=order_id,
                     product_id=uuid.UUID(lot["product_id"]),
                     quantity=lot["quantity"],

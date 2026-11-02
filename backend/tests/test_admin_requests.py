@@ -213,8 +213,10 @@ def test_transition_limit_50(api: ApiClient, db_engine: Engine) -> None:
             status = steps[(seq - 2) % 3]
             conn.execute(
                 text(
-                    "INSERT INTO adm_request_transition (request_id, seq, status, at, note) "
-                    "SELECT id, :seq, :status, created_at, :note FROM adm_request WHERE id = :id"
+                    "INSERT INTO adm_request_transition"
+                    " (workspace_id, request_id, seq, status, at, note) "
+                    "SELECT workspace_id, id, :seq, :status, created_at, :note"
+                    " FROM adm_request WHERE id = :id"
                 ),
                 {
                     "seq": seq,
