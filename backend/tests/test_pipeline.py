@@ -177,6 +177,15 @@ def test_origin_uses_forwarded_headers(api):
     assert r.status_code == 200, r.text
 
 
+def test_forwarded_https_origin_and_secure_cookie(api):
+    """前端 nginx 前面還有 TLS 代理時：沿用其 X-Forwarded-*，不設 ALLOWED_ORIGINS 也能寫入，
+    且 cookie 帶 Secure。"""
+    forwarded = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "h"}
+    r = _raw_post(api, ECHO, b"{}", Origin="https://h", **forwarded)
+    assert r.status_code == 200, r.text
+    assert "Secure" in [a.strip() for a in _set_cookie(r).split(";")]
+
+
 def test_origin_allow_list(make_client):
     api = ApiClient(make_client(allowed_origins=["https://ok.example"]))
     assert _error(api.mutate("POST", ECHO, {})) == (403, "origin_invalid")
