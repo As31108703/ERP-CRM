@@ -171,7 +171,7 @@ curl http://localhost:8080/api/health
 # {"name":"erpcrm","version":"0.1.0","simulation":true,"real_finance":false,"currency":"SIM"}
 ```
 
-對外的連接埠：前端 8080、後端 API 8000、PostgreSQL 5436。被占用時請修改 `docker-compose.yaml` 的 `ports`。
+對外的連接埠：前端 8080、後端 API 8000、PostgreSQL 5436。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
 
 ## 環境變數
 

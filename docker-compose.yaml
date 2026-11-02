@@ -45,4 +45,5 @@ services:
     depends_on:
       - backend
     ports:
-      - 8080:80
+      # 主機連接埠可用 .env 的 FRONTEND_PORT 覆寫（預設 8080）
+      - ${FRONTEND_PORT:-8080}:80
