@@ -25,7 +25,7 @@ from src.core.problem import Problem, ensure
 from src.modules.backup.schema import BACKUP_FORMAT, BACKUP_FORMAT_VERSION, Backup, Collections
 from src.modules.catalog.templates import get_template, resolve_modules
 from src.modules.wallets.entity import WALLET_KINDS
-from src.modules.workspace.service import SCHEMA_VERSION, _company_name, snapshot
+from src.modules.workspace.service import SCHEMA_VERSION, normalize_company_name, snapshot
 from src.platform import registry
 from src.platform.context import CommandContext, HistoryRow, WorkspaceRow
 
@@ -49,9 +49,7 @@ META_KEYS = (
 
 
 def export(ctx: CommandContext) -> dict[str, Any]:
-    ensure(ctx.workspace is not None, 409, "workspace_missing", "請先建立工作區")
-    assert ctx.workspace is not None
-    world = snapshot(ctx.db, ctx.workspace, ctx.session_row.version)
+    world = snapshot(ctx.db, ctx.require_workspace(), ctx.session_row.version)
     return {
         "format": BACKUP_FORMAT,
         "format_version": BACKUP_FORMAT_VERSION,
@@ -197,7 +195,7 @@ def import_backup(ctx: CommandContext, payload: dict[str, Any]) -> str | None:
     meta = backup.workspace
     _check_simulation(backup)
     template = get_template(meta.industry)
-    name = _company_name(meta.company_name)
+    name = normalize_company_name(meta.company_name)
     modules = resolve_modules(template.id, list(meta.modules))
     _check_ids(backup.collections)
     _check_rows(backup.collections)

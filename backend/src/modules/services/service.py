@@ -15,12 +15,13 @@ from src.core.money import check_int
 from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import Template
 from src.modules.crm.entity import CrmRecordRow
+from src.modules.crm.records import find_record
 from src.modules.crm.service import list_records
 from src.modules.services.entity import ServiceDeliveryRow, ServiceRow
 from src.modules.wallets import service as wallets
 from src.modules.wallets.service import LedgerView, ledger_invalid, register_ledger_rule
 from src.platform.context import CommandContext
-from src.platform.records import find_record, record_missing, scoped_get
+from src.platform.records import record_missing, scoped_get
 
 DRAFT = "draft"
 CONFIRMED = "confirmed"
@@ -208,8 +209,8 @@ def pay_service(ctx: CommandContext, p: dict[str, Any]) -> str:
 
 def seed_services(ctx: CommandContext, template: Template) -> None:
     """B§3.0：同時啟用 crm 與 services 時，為示範案件建立範本價格的草稿服務。"""
-    assert ctx.workspace is not None
-    modules = ctx.workspace.modules
+    workspace = ctx.require_workspace()
+    modules = workspace.modules
     if "crm" not in modules or "services" not in modules:
         return
     case = list_records(ctx.db, ctx.workspace_id, "cases")[0]

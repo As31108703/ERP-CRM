@@ -10,8 +10,7 @@ from src.platform.context import CommandContext
 
 def enable(ctx: CommandContext, payload: dict[str, Any]) -> str | None:
     parse("office.enable", payload)
-    workspace = ctx.workspace
-    assert workspace is not None  # needs_workspace 已先擋下
+    workspace = ctx.require_workspace()
     ensure(MODULE not in workspace.modules, 409, "office_already_enabled", "行政模組已啟用")
     # 重新指定整個串列，ARRAY 欄位才會被標記為已變更
     workspace.modules = [*workspace.modules, MODULE]

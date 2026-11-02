@@ -24,7 +24,8 @@ NAME_MAX = 100
 WORKSPACE_LIMIT = 1_000_000
 
 
-def _company_name(value: object) -> str:
+def normalize_company_name(value: object) -> str:
+    """店名去掉前後空白後須為 1–100 字，否則 422 name_invalid（建立與匯入共用）。"""
     name = value.strip() if isinstance(value, str) else ""
     ensure(0 < len(name) <= NAME_MAX, 422, "name_invalid", "請填店名")
     return name
@@ -35,7 +36,7 @@ def create_workspace(
 ) -> WorkspaceRow:
     """依 B§3.0 檢查並建立工作區與示範資料；檢查順序為範本、名稱、模組。"""
     template = get_template(industry)
-    name = _company_name(company_name)
+    name = normalize_company_name(company_name)
     selected = resolve_modules(template.id, modules)  # type: ignore[arg-type]
     workspace = WorkspaceRow(
         session_id=ctx.session_row.id,

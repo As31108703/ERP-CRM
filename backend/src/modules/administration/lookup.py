@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlmodel import SQLModel
 
-from src.core.problem import ensure
+from src.core.problem import Problem, ensure
 from src.modules.administration import validators as v
 from src.modules.administration.entity import AdmStaff, AdmUnit
 from src.platform.context import CommandContext
@@ -17,8 +17,8 @@ def row_by_id[T: SQLModel](
 ) -> T:
     """以 id 取得本工作區的資料列；其他工作區的資料一律視為不存在。"""
     row = scoped_get(ctx.db, model, ctx.workspace_id, v.uuid_value(row_id), lock=lock)
-    ensure(row is not None, 404, "office_record_missing", "找不到行政紀錄")
-    assert row is not None
+    if row is None:
+        raise Problem(404, "office_record_missing", "找不到行政紀錄")
     return row
 
 

@@ -21,7 +21,7 @@ from src.modules.administration.views import (
 )
 
 # JS 的 \s 也涵蓋 U+FEFF；Python 的 \s 不含，另外列出
-_FORMULA = re.compile(r"[\s﻿\x00-\x1f]*[=+\-@]")
+_FORMULA = re.compile(r"[\s\ufeff\x00-\x1f]*[=+\-@]")
 
 MODE = "SIM 流程練習"
 TIMEZONE = "Asia/Taipei（UTC+08:00）"
@@ -106,7 +106,7 @@ def _cell(raw: Any) -> str:
 
 
 def to_csv(rows: Sequence[Sequence[Any]]) -> str:
-    return "﻿" + "".join(",".join(_cell(c) for c in row) + "\r\n" for row in rows)
+    return "\ufeff" + "".join(",".join(_cell(c) for c in row) + "\r\n" for row in rows)
 
 
 def filename(tab: str, now: datetime) -> str:

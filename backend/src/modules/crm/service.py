@@ -1,6 +1,6 @@
 """CRM（B§3.0、B§3.3、B§3.4）：示範資料、商機跟進與報價。
 
-通用紀錄的建立／更新在 `platform/records.generic_create／generic_update`（B§3.2），
+通用紀錄的建立／更新在 `modules/crm/records.generic_create／generic_update`（B§3.2），
 本模組與 projects（Task 10）共用。其他模組以 `find_record(ctx, "cases", id)` 取得案件。
 """
 
@@ -12,13 +12,13 @@ from sqlmodel import Session, select
 from src.core import clock
 from src.core.canonical import digest
 from src.core.money import check_int
-from src.core.problem import ensure
+from src.core.problem import Problem, ensure
 from src.modules.catalog.templates import Template
 from src.modules.crm.entity import CrmRecordRow, DealFollowupRow, QuoteRow
+from src.modules.crm.records import find_record
 from src.platform.context import CommandContext
 from src.platform.records import (
     crm_record_missing,
-    find_record,
     js_length,
     parse_loose_instant,
     scoped_get,
@@ -111,13 +111,8 @@ def create_followup(ctx: CommandContext, p: dict[str, Any]) -> str:
     """`followup.create {deal_id, note}`：note 為最多 2000 字的字串（可為空字串），回傳商機 id。"""
     deal = find_record(ctx, "deals", p.get("deal_id"))
     note = p.get("note")
-    ensure(
-        isinstance(note, str) and js_length(note) <= NOTE_MAX,
-        422,
-        "note_invalid",
-        "請填追蹤內容",
-    )
-    assert isinstance(note, str)
+    if not isinstance(note, str) or js_length(note) > NOTE_MAX:
+        raise Problem(422, "note_invalid", "請填追蹤內容")
     ctx.db.add(
         DealFollowupRow(
             workspace_id=deal.workspace_id, deal_id=deal.id, note=note, created_at=ctx.now
@@ -135,8 +130,8 @@ def create_quote(ctx: CommandContext, p: dict[str, Any]) -> str:
     case = find_record(ctx, "cases", p.get("case_id"))
     amount = check_int(p.get("amount_minor"), min_=1)
     expires_at = parse_loose_instant(p.get("expires_at"))
-    ensure(expires_at is not None, 422, "expiry_invalid", "請填有效期限")
-    assert expires_at is not None
+    if expires_at is None:
+        raise Problem(422, "expiry_invalid", "請填有效期限")
     row = QuoteRow(
         workspace_id=uuid.UUID(ctx.workspace_id),
         case_id=case.id,
@@ -201,10 +196,10 @@ def _seed_record(ctx: CommandContext, collection: str, **fields: Any) -> CrmReco
 
 def seed_crm(ctx: CommandContext, template: Template) -> None:
     """B§3.0：示範客戶一律建立；啟用 crm 時再建立案件（open）與商機（new）。"""
-    assert ctx.workspace is not None
+    workspace = ctx.require_workspace()
     sample = template.sample
     customer = _seed_record(ctx, "customers", name=sample.customer)
-    if "crm" not in ctx.workspace.modules:
+    if "crm" not in workspace.modules:
         return
     _seed_record(ctx, "cases", title=sample.service, customer_id=customer.id, status="open")
     _seed_record(

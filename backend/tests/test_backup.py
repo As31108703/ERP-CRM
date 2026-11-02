@@ -270,7 +270,7 @@ def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> No
         ),
         # sales.get_order
         ("POST", f"{ORDERS}/{ids['order']}/cancel", {}, "simulation_record_missing"),
-        # records.find_record
+        # crm.records.find_record
         ("PATCH", f"{CRM}/cases/{ids['case']}", {"title": "x"}, "record_missing"),
         ("POST", f"{CRM}/deals/{ids['deal']}/followups", {"note": "x"}, "record_missing"),
         # crm 報價

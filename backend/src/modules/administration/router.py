@@ -368,9 +368,11 @@ def attendance_diff(request: Request, ctx: CommandContext = Touch) -> list[dict[
 def export_csv(request: Request, ctx: CommandContext = Touch) -> Response:
     desk = views.load(ctx)
     params = views.parse_params(request.query_params, ctx.now)
-    assert ctx.workspace is not None
     name, content = csv_export.export(
-        desk, params, company_name=ctx.workspace.company_name, version=ctx.session_row.version
+        desk,
+        params,
+        company_name=ctx.require_workspace().company_name,
+        version=ctx.session_row.version,
     )
     return Response(
         content=content.encode("utf-8"),

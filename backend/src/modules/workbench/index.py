@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from src.core import clock
-from src.modules.administration.views import format_sim
+from src.core.money import format_sim
 
 Row = Mapping[str, Any]
 

@@ -92,7 +92,8 @@ def create_demo(ctx: CommandContext, payload: dict[str, Any]) -> str | None:
 
     def run(handler: Any, body: dict[str, Any]) -> str:
         result = handler(ctx, body)
-        assert result is not None
+        if result is None:  # 建立類 handler 一律回傳新紀錄 id
+            raise RuntimeError("示範資料建立失敗：handler 沒有回傳 id")
         return str(result)
 
     unit = run(create_unit, {"name": preset.unit, "kind": preset.kind})

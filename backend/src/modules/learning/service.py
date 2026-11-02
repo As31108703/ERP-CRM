@@ -104,9 +104,9 @@ def _path(ctx: CommandContext, path_id: str) -> LearningPath:
     path = PATHS.get(path_id)
     if path is None:
         raise Problem(404, "learning_path_missing", "找不到這條教學路線")
-    assert ctx.workspace is not None
+    workspace = ctx.require_workspace()
     ensure(
-        all(m in ctx.workspace.modules for m in path.modules),
+        all(m in workspace.modules for m in path.modules),
         403,
         "module_disabled",
         "目前工作區未啟用這條教學需要的模組。",
@@ -115,9 +115,7 @@ def _path(ctx: CommandContext, path_id: str) -> LearningPath:
 
 
 def _workspace(ctx: CommandContext) -> WorkspaceRow:
-    ensure(ctx.workspace is not None, 409, "workspace_missing", "請先建立工作區")
-    assert ctx.workspace is not None
-    return ctx.workspace
+    return ctx.require_workspace()
 
 
 def _sessions(db: Session, workspace_id: uuid.UUID) -> list[LearningSessionRow]:

@@ -29,12 +29,14 @@ def problem_response(p: Problem) -> JSONResponse:
 
 
 async def _handle_problem(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, Problem)
+    if not isinstance(exc, Problem):  # 只登錄給 Problem；其他例外原樣拋出
+        raise exc
     return problem_response(exc)
 
 
 async def _handle_http_error(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, StarletteHTTPException)
+    if not isinstance(exc, StarletteHTTPException):  # 只登錄給 HTTPException
+        raise exc
     code, message = _HTTP_ERRORS.get(exc.status_code, ("http_error", "無法處理這個請求"))
     # 保留框架給的標頭，例如 405 的 Allow
     return JSONResponse(

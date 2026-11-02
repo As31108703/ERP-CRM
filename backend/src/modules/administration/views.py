@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from src.core import clock
+from src.core.money import format_sim
 from src.core.problem import ensure
 from src.modules.administration import snapshot
 from src.modules.administration import validators as v
@@ -114,13 +115,6 @@ def net_minutes(row: Mapping[str, Any]) -> int:
     return max(0, (ms + 30_000) // 60_000 - row["break_minutes"])
 
 
-def format_sim(minor: int) -> str:
-    """`1,234.50 SIM`；金額為非負整數 minor（100 minor = 1 SIM）。"""
-    sign = "-" if minor < 0 else ""
-    whole, cents = divmod(abs(minor), 100)
-    return f"{sign}{whole:,}.{cents:02d} SIM"
-
-
 # --- 資料 -----------------------------------------------------------------------------
 
 
@@ -179,9 +173,8 @@ class Desk:
 
 def load(ctx: CommandContext) -> Desk:
     """讀取前的閘：沒有工作區 409、未啟用行政模組 403，與寫入命令一致。"""
-    ensure(ctx.workspace is not None, 409, "workspace_missing", "請先建立工作區")
-    assert ctx.workspace is not None
-    ensure(snapshot.MODULE in ctx.workspace.modules, 403, "module_disabled", "模組未啟用")
+    workspace = ctx.require_workspace()
+    ensure(snapshot.MODULE in workspace.modules, 403, "module_disabled", "模組未啟用")
     return Desk(snapshot.administration(ctx.db, ctx.workspace_id))
 
 

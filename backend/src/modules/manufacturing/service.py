@@ -355,8 +355,8 @@ def cancel_work_order(ctx: CommandContext, p: dict[str, Any]) -> str:
 
 def seed_manufacturing(ctx: CommandContext, template: Template) -> None:
     """B§3.0：啟用 manufacturing 時建立 BOM 第 1 版：商品 A ← 商品 B × bom_quantity（預設 1）。"""
-    assert ctx.workspace is not None
-    if "manufacturing" not in ctx.workspace.modules:
+    workspace = ctx.require_workspace()
+    if "manufacturing" not in workspace.modules:
         return
     finished, material = inventory.list_products(ctx.db, ctx.workspace_id)[:2]
     quantity = template.sample.bom_quantity

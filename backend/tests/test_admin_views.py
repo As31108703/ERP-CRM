@@ -70,7 +70,7 @@ def _csv(api: ApiClient, **params: str) -> tuple[str, list[list[str]]]:
     r = api.get(EXPORT, params=params)
     assert r.status_code == 200, r.text
     body = r.content.decode("utf-8")
-    assert body.startswith("﻿")
+    assert body.startswith("\ufeff")
     return body, list(csv.reader(io.StringIO(body[1:], newline="")))
 
 
@@ -351,14 +351,14 @@ def test_csv_bom_crlf_and_quotes(api: ApiClient) -> None:
         'attachment; filename="erpcrm-admin-units-2026-11-03.csv"'
     )
     body = r.content.decode("utf-8")
-    assert body.startswith('﻿"模式","工作區",')
+    assert body.startswith('\ufeff"模式","工作區",')
     assert body.endswith("\r\n")
     lines = body[1:].split("\r\n")
     assert len(lines) == 3 and lines[-1] == ""
     quoted = re.compile(r'"(?:[^"]|"")*"(?:,"(?:[^"]|"")*")*')
     for line in lines[:-1]:
         assert quoted.fullmatch(line), line
-    assert csv_export.to_csv([['a"b', None, 3]]) == '﻿"a""b","","3"\r\n'
+    assert csv_export.to_csv([['a"b', None, 3]]) == '\ufeff"a""b","","3"\r\n'
 
 
 def test_csv_formula_injection_prefixed(api: ApiClient) -> None:
