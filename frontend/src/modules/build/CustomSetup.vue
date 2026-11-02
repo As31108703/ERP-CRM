@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import { downloadFile } from "../../lib/download";
 import { COMPANY_MAX, LAUNCH_KIT_FILENAME, launchKitUrl, validateCompany, type BuildConfig } from "../../lib/modules";
 import EmptyState from "../../ui/EmptyState.vue";
 import HudPanel from "../../ui/HudPanel.vue";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { defaultDraft } from "./draft";
+import { defaultDraft, draftFromQuery } from "./draft";
 import ModuleChecklist from "./ModuleChecklist.vue";
 import TemplateGrid from "./TemplateGrid.vue";
 import { useBuilder } from "./useBuilder";
 
 /**
  * 自訂建置：單頁表單（選產業 → 調整模組 → 開始模擬）。
- * 已有工作區時（例如之後在設定頁「切換產業範本」重用），按鈕改為「先清除目前工作區」並發出 `request-clear`。
+ * 已有工作區時（設定頁「切換產業範本」），按鈕改為「先清除目前工作區」，設定有效才發出 `request-clear`（帶著選好的設定）。
+ * 路由帶有 industry／company／modules 時（清除後由設定頁導入），以草稿規則驗證後預選。
  */
-const emit = defineEmits<{ "request-clear": [] }>();
+const emit = defineEmits<{ "request-clear": [config: BuildConfig] }>();
 
 const store = useWorkspaceStore();
+const route = useRoute();
 const config = ref<BuildConfig>({ industry: "", company: "", modules: [] });
 const b = useBuilder(config);
 
@@ -23,7 +27,8 @@ watch(
   () => store.templates,
   (t) => {
     if (!t || t.items.length === 0 || config.value.industry) return;
-    const d = defaultDraft(t, b.dependencies.value);
+    const ids = t.items.map((x) => x.id);
+    const d = draftFromQuery(route.query, ids, b.dependencies.value) ?? defaultDraft(t, b.dependencies.value);
     config.value = { industry: d.industry, company: d.company, modules: d.modules };
   },
   { immediate: true },
@@ -32,6 +37,21 @@ watch(
 const companyTouched = ref(false);
 const companyError = computed(() => (companyTouched.value ? validateCompany(config.value.company) : null));
 const kitUrl = computed(() => launchKitUrl(config.value));
+const kitBusy = ref(false);
+
+async function downloadKit(): Promise<void> {
+  if (kitBusy.value) return;
+  kitBusy.value = true;
+  b.notice.value = "";
+  b.localError.value = "";
+  try {
+    const error = await downloadFile(kitUrl.value, LAUNCH_KIT_FILENAME);
+    if (error) b.localError.value = error;
+    else b.notice.value = "已下載本機啟動包。解壓縮到星軌 ERP-CRM 專案資料夾，再依包內 README.txt 啟動。";
+  } finally {
+    kitBusy.value = false;
+  }
+}
 const ready = computed(() => !b.locked.value && b.configError.value === null);
 
 function onCompany(event: Event): void {
@@ -41,7 +61,8 @@ function onCompany(event: Event): void {
 function submit(): void {
   companyTouched.value = true;
   if (store.hasWorkspace) {
-    if (!b.locked.value) emit("request-clear");
+    b.localError.value = b.configError.value ?? "";
+    if (!b.locked.value && !b.configError.value) emit("request-clear", { ...config.value, modules: [...config.value.modules] });
     return;
   }
   void b.create();
@@ -121,14 +142,9 @@ function submit(): void {
           >
             {{ b.creating.value ? "建立中…" : store.hasWorkspace ? "先清除目前工作區" : "建立我的系統" }}
           </button>
-          <a
-            v-if="ready"
-            class="btn"
-            :href="kitUrl"
-            :download="LAUNCH_KIT_FILENAME"
-            data-testid="custom-launch-kit"
-          >下載本機啟動包</a>
-          <button v-else type="button" class="btn" disabled>下載本機啟動包</button>
+          <button type="button" class="btn" :disabled="!ready || kitBusy" data-testid="custom-launch-kit" @click="downloadKit">
+            {{ kitBusy ? "下載中…" : "下載本機啟動包" }}
+          </button>
         </div>
         <p class="field__hint">
           本機啟動包內含 docker compose 用的 <code>.env</code> 與啟動說明；解壓縮到專案資料夾後執行 <code>docker compose up -d --build</code>。

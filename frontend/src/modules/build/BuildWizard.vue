@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { downloadFile } from "../../lib/download";
 import {
   LAUNCH_KIT_FILENAME,
   launchKitUrl,
@@ -93,8 +94,21 @@ function onCompany(event: Event): void {
 const kitUrl = computed(() => launchKitUrl(config.value));
 const kitReady = computed(() => !b.locked.value && b.configError.value === null);
 
-function onKitDownload(): void {
-  b.notice.value = "已開始下載本機啟動包。解壓縮到星軌 ERP-CRM 專案資料夾，再依包內 README.txt 啟動。";
+const kitBusy = ref(false);
+
+/** 先確認伺服器接受設定（例如 422 時顯示原因），成功才存成 ZIP。 */
+async function downloadKit(): Promise<void> {
+  if (kitBusy.value || !kitReady.value) return;
+  kitBusy.value = true;
+  b.notice.value = "";
+  b.localError.value = "";
+  try {
+    const error = await downloadFile(kitUrl.value, LAUNCH_KIT_FILENAME);
+    if (error) b.localError.value = error;
+    else b.notice.value = "已下載本機啟動包。解壓縮到星軌 ERP-CRM 專案資料夾，再依包內 README.txt 啟動。";
+  } finally {
+    kitBusy.value = false;
+  }
 }
 
 function switchToLocal(): void {
@@ -284,15 +298,15 @@ const companyShown = computed(() => config.value.company.trim() || "（尚未命
 
             <template v-else>
               <div class="wizard__actions">
-                <a
-                  v-if="kitReady"
+                <button
+                  type="button"
                   class="btn btn--primary"
-                  :href="kitUrl"
-                  :download="LAUNCH_KIT_FILENAME"
+                  :disabled="!kitReady || kitBusy"
                   data-testid="launch-kit"
-                  @click="onKitDownload"
-                >下載本機啟動包 ZIP</a>
-                <button v-else type="button" class="btn btn--primary" disabled data-testid="launch-kit">下載本機啟動包 ZIP</button>
+                  @click="downloadKit"
+                >
+                  {{ kitBusy ? "下載中…" : "下載本機啟動包 ZIP" }}
+                </button>
               </div>
               <details class="wizard__details" open>
                 <summary>本機啟動步驟</summary>

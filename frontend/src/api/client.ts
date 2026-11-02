@@ -71,7 +71,8 @@ function errorFrom(status: number, text: string, retryAfter: string | null): Api
   return new ApiError(status, code, message, retryAfterMs);
 }
 
-async function decodeError(res: Response): Promise<ApiError> {
+/** 把非 2xx 的 fetch 回應解成 ApiError（下載等非 JSON 請求也共用）。 */
+export async function decodeError(res: Response): Promise<ApiError> {
   let text = "";
   try {
     text = await res.text();

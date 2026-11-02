@@ -9,6 +9,7 @@ const MiB = 1024 * 1024;
 export const FILE_LIMIT = 8 * MiB;
 export const UPLOAD_LIMIT = 3 * MiB;
 
+export const EXPORTED_MESSAGE = "已下載可還原的 SIM 備份。";
 export const RESTORED_MESSAGE = "備份已完整檢查並還原，已建立新的資料世代。";
 
 export type RestorePhase = "confirm" | "checking" | "uploading" | "verifying" | "done" | "failed";

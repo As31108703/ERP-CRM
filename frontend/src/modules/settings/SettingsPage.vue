@@ -7,11 +7,14 @@ import { list, num, str } from "../../lib/records";
 import { useWorkspaceStore } from "../../stores/workspace";
 import Dialog from "../../ui/Dialog.vue";
 import HudPanel from "../../ui/HudPanel.vue";
+import { downloadFile } from "../../lib/download";
+import type { BuildConfig } from "../../lib/modules";
 import CustomSetup from "../build/CustomSetup.vue";
+import { switchLocation } from "../build/draft";
 import { retentionSummary } from "../build/useBuilder";
 import PageHead from "../shared/PageHead.vue";
 import BackupRestoreDialog from "./BackupRestoreDialog.vue";
-import { BACKUP_FILENAME, EXPORT_PATH, precheckBackup, type BackupCandidate } from "./backup";
+import { BACKUP_FILENAME, EXPORT_PATH, EXPORTED_MESSAGE, precheckBackup, type BackupCandidate } from "./backup";
 
 const CLEAR_PATH = "/api/v1/workspace/clear";
 
@@ -85,12 +88,37 @@ async function onFile(event: Event): Promise<void> {
   }
 }
 
+// ── 匯出 ──
+const exporting = ref(false);
+const exportError = ref("");
+const exportMessage = ref("");
+
+async function exportBackup(): Promise<void> {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportError.value = "";
+  exportMessage.value = "";
+  try {
+    const error = await downloadFile(EXPORT_PATH, BACKUP_FILENAME);
+    if (error) exportError.value = error;
+    else exportMessage.value = EXPORTED_MESSAGE;
+  } finally {
+    exporting.value = false;
+  }
+}
+
 // ── 清除與切換範本 ──
 const switching = ref(false);
 const clearMode = ref<"clear" | "switch" | null>(null);
+let switchTarget: BuildConfig | null = null;
 
 function startSwitch(): void {
   switching.value = true;
+}
+
+function requestSwitch(config: BuildConfig): void {
+  switchTarget = { ...config, modules: [...config.modules] };
+  clearMode.value = "switch";
 }
 
 async function confirmClear(): Promise<void> {
@@ -99,8 +127,9 @@ async function confirmClear(): Promise<void> {
   const result = await store.run("POST", CLEAR_PATH, {});
   if (result === null) return;
   clearMode.value = null;
-  // 單純清除回到快速上手；切換範本則留在此頁，接著用下方表單建立新範本
-  if (mode === "clear") await router.push("/build");
+  // 單純清除回到快速上手；切換範本則帶著選好的範本前往自訂建置（沒有工作區時設定頁不可停留）
+  if (mode === "switch" && switchTarget) await router.push(switchLocation(switchTarget));
+  else await router.push("/build");
 }
 </script>
 
@@ -124,7 +153,9 @@ async function confirmClear(): Promise<void> {
 
       <HudPanel title="備份與資料" code="BKP-02">
         <div class="set__actions">
-          <a class="btn btn--primary" data-testid="export-backup" :href="EXPORT_PATH" :download="BACKUP_FILENAME">匯出 SIM JSON</a>
+          <button type="button" class="btn btn--primary" data-testid="export-backup" :disabled="exporting" @click="exportBackup">
+            {{ exporting ? "匯出中…" : "匯出 SIM JSON" }}
+          </button>
           <button type="button" class="btn" :disabled="Boolean(blocked) || checkingFile" @click="pickFile">
             {{ checkingFile ? "檢查檔案中…" : "匯入 SIM JSON" }}
           </button>
@@ -150,6 +181,8 @@ async function confirmClear(): Promise<void> {
           </button>
         </div>
         <p v-if="blocked" class="set__note">{{ blocked }}</p>
+        <p v-if="exportMessage" class="set__ok" role="status" data-testid="export-message">{{ exportMessage }}</p>
+        <p v-if="exportError" class="set__error" role="alert" data-testid="export-error">{{ exportError }}</p>
         <p v-if="importError" class="set__error" role="alert" data-testid="import-error">{{ importError }}</p>
         <p class="set__note">
           備份一次上傳完成：檔案上限 8 MiB，精簡後內容上限 3 MiB。還原前會先在瀏覽器檢查格式，再由伺服器完整驗證；驗證不通過時現有資料不變。
@@ -167,7 +200,7 @@ async function confirmClear(): Promise<void> {
       </HudPanel>
     </div>
 
-    <CustomSetup v-if="switching" @request-clear="clearMode = 'switch'" />
+    <CustomSetup v-if="switching && ws" @request-clear="requestSwitch" />
 
     <Dialog :open="clearMode !== null" :title="clearMode === 'switch' ? '清除後切換範本' : '清除測試資料'" code="WIPE" @close="clearMode = null">
       <p class="set__warn">
@@ -223,6 +256,10 @@ async function confirmClear(): Promise<void> {
   margin: 10px 0 0;
   font-size: 0.85rem;
   color: var(--ink-dim);
+}
+.set__ok {
+  margin: 10px 0 0;
+  color: var(--ok);
 }
 .set__error {
   margin: 10px 0 0;

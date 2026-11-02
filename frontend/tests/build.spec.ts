@@ -32,6 +32,20 @@ const VIEW_WS = {
   workspace: { generation_id: "g", version: 1, company_name: "甲店", industry: "service", modules: ["services", "wallets", "crm", "projects"] },
 };
 
+const KIT_URL =
+  "/api/v1/backup/launch-kit?industry=service&company_name=%E7%94%B2%E5%BA%97&modules=inventory,sales,wallets,crm,projects";
+let kitResponse: Response | null = null;
+
+/** 攔下暫時的 `<a download>` 點擊與物件網址，回傳被存檔的檔名清單。 */
+function stubDownload(): string[] {
+  const saved: string[] = [];
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:kit"), revokeObjectURL: vi.fn() }));
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    saved.push(this.download);
+  });
+  return saved;
+}
+
 function stubApi() {
   const calls: { method: string; url: string; body: unknown }[] = [];
   let created = false;
@@ -42,6 +56,7 @@ function stubApi() {
       calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
       if (url === "/api/templates") return json(200, TEMPLATES);
       if (url === "/api/v1/workspace/view") return json(200, created ? VIEW_WS : VIEW_EMPTY);
+      if (url.startsWith("/api/v1/backup/launch-kit?")) return kitResponse ?? new Response(new Blob(["PK"]), { status: 200 });
       if (method === "POST" && url === "/api/v1/workspace/setup") {
         created = true;
         return json(200, { result: null, ...VIEW_WS });
@@ -70,7 +85,29 @@ describe("build wizard", () => {
     window.sessionStorage.clear();
     document.body.innerHTML = "";
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    kitResponse = null;
+  });
+
+  it("launch kit 422 is shown as an error, not saved as a zip", async () => {
+    stubApi();
+    const saved = stubDownload();
+    kitResponse = json(422, { error: { code: "config_invalid", message: "模組設定不正確。" } });
+    const { wrapper } = await mountAt("/build");
+    await wrapper.get("[data-testid=company-input]").setValue("甲店");
+    await wrapper.get("[data-industry=service]").trigger("click");
+    await wrapper.get("[data-testid=build-next]").trigger("click");
+    await wrapper.get("[data-testid=build-next]").trigger("click");
+    await wrapper.get("[data-testid=dest-local]").setValue(true);
+    await wrapper.get("[data-testid=launch-kit]").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll("[role=alert]").map((a) => a.text())).toContain("模組設定不正確。");
+    expect(saved).toEqual([]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 
   it("walks three steps, cascades modules and creates the workspace", async () => {
     const calls = stubApi();
@@ -106,12 +143,14 @@ describe("build wizard", () => {
     await wrapper.get("[data-testid=build-next]").trigger("click");
     expect(wrapper.get("[data-testid=step-heading]").text()).toBe("建立我的系統");
 
-    // 本機啟動包連結
+    // 本機啟動包：先 fetch，成功才存成 ZIP
+    const saved = stubDownload();
     await wrapper.get("[data-testid=dest-local]").setValue(true);
-    expect(wrapper.get("[data-testid=launch-kit]").attributes("href")).toBe(
-      "/api/v1/backup/launch-kit?industry=service&company_name=%E7%94%B2%E5%BA%97&modules=inventory,sales,wallets,crm,projects",
-    );
-    expect(wrapper.get("[data-testid=launch-kit]").attributes("download")).toBe("erpcrm-launch-kit.zip");
+    await wrapper.get("[data-testid=launch-kit]").trigger("click");
+    await flushPromises();
+    expect(calls.at(-1)?.url).toBe(KIT_URL);
+    expect(saved).toEqual(["erpcrm-launch-kit.zip"]);
+    expect(wrapper.text()).toContain("已下載本機啟動包");
 
     await wrapper.find("input[value=public]").setValue(true);
     await wrapper.get("[data-testid=build-create]").trigger("click");
@@ -145,6 +184,79 @@ describe("build wizard", () => {
     setActivePinia(createPinia());
     ({ wrapper } = await mountAt("/build"));
     expect(wrapper.get<HTMLInputElement>("[data-testid=company-input]").element.value).toBe("");
+    wrapper.unmount();
+  });
+});
+
+describe("switch template from settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+    window.sessionStorage.clear();
+    document.body.innerHTML = "";
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("clear lands on custom setup with the chosen template, then setup succeeds", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    let state: "old" | "cleared" | "new" = "old";
+    const OLD = { ...VIEW_WS, workspace: { ...VIEW_WS.workspace, industry: "retail", company_name: "舊店", modules: ["inventory", "sales", "wallets", "crm"] } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
+        if (url === "/api/templates") return json(200, TEMPLATES);
+        if (url === "/api/v1/workspace/view") return json(200, state === "old" ? OLD : state === "new" ? VIEW_WS : VIEW_EMPTY);
+        if (method === "POST" && url === "/api/v1/workspace/clear") {
+          state = "cleared";
+          return json(200, { result: null, ...VIEW_EMPTY });
+        }
+        if (method === "POST" && url === "/api/v1/workspace/setup") {
+          state = "new";
+          return json(200, { result: null, ...VIEW_WS });
+        }
+        return json(404, { error: { code: "not_found", message: "找不到資源" } });
+      }),
+    );
+    const { wrapper, router } = await mountAt("/settings");
+    const switchBtn = wrapper.findAll("button").find((b) => b.text() === "切換產業範本");
+    await switchBtn!.trigger("click");
+    await wrapper.get("[data-testid=custom-company]").setValue("乙店");
+    await wrapper.get("[data-industry=service]").trigger("click");
+    await wrapper.get("[data-testid=custom-create]").trigger("click");
+    await flushPromises();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>("[role=dialog] button")].find((b) => b.textContent?.trim() === "確認清除");
+    confirm!.click();
+    await flushPromises();
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe("/custom"));
+    await flushPromises();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/v1/workspace/clear"]);
+    expect(router.currentRoute.value.query).toEqual({ industry: "service", company: "乙店", modules: "services,wallets,crm,projects" });
+
+    // 自訂建置頁已預選範本與名稱
+    expect(wrapper.get<HTMLInputElement>("[data-testid=custom-company]").element.value).toBe("乙店");
+    expect(wrapper.get("[data-industry=service]").attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get("[data-testid=custom-create]").text()).toBe("建立我的系統");
+    await wrapper.get("[data-testid=custom-create]").trigger("click");
+    await flushPromises();
+    expect(calls.filter((c) => c.method === "POST").at(-1)).toEqual({
+      method: "POST",
+      url: "/api/v1/workspace/setup",
+      body: { industry: "service", company_name: "乙店", modules: ["services", "wallets", "crm", "projects"] },
+    });
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe("/overview"));
+    wrapper.unmount();
+  });
+
+  it("ignores a tampered preselection query", async () => {
+    stubApi();
+    const { wrapper } = await mountAt("/custom?industry=service&company=x&modules=sales");
+    // sales 缺少相依模組，整份不採用，退回預設範本
+    expect(wrapper.get<HTMLInputElement>("[data-testid=custom-company]").element.value).toBe("");
+    expect(wrapper.get("[data-industry=retail]").attributes("aria-pressed")).toBe("true");
     wrapper.unmount();
   });
 });

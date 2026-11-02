@@ -206,10 +206,52 @@ describe("settings page", () => {
     expect(items[1].text()).toContain("product.create");
   });
 
-  it("export links to the backup endpoint with the backup file name", async () => {
+  function stubSave() {
+    const saved: { name: string; href: string }[] = [];
+    const create = vi.fn(() => "blob:backup");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push({ name: this.download, href: this.href });
+    });
+    return { saved, create, restore: () => click.mockRestore() };
+  }
+
+  it("export downloads the backup blob with the backup file name", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Blob(['{"format":"erpcrm-sim-backup"}']), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { saved, create, restore } = stubSave();
     const { wrapper } = await mountPage(SettingsPage, workspace(), { module: "settings" });
-    const link = wrapper.get("[data-testid=export-backup]");
-    expect(link.attributes("href")).toBe("/api/v1/backup/export");
-    expect(link.attributes("download")).toBe("erpcrm-sim-backup.json");
+    await wrapper.get("[data-testid=export-backup]").trigger("click");
+    await flush();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/backup/export", { credentials: "same-origin" });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saved).toEqual([{ name: "erpcrm-sim-backup.json", href: "blob:backup" }]);
+    expect(wrapper.get("[data-testid=export-message]").text()).toBe("已下載可還原的 SIM 備份。");
+    expect(wrapper.find("[data-testid=export-error]").exists()).toBe(false);
+    restore();
+  });
+
+  it("export error JSON is shown, not saved as a file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { code: "rate_limit", message: "請求太頻繁，請稍後再試。", retry_after_ms: 2000 } }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "2" },
+          }),
+      ),
+    );
+    const { saved, create, restore } = stubSave();
+    const { wrapper } = await mountPage(SettingsPage, workspace(), { module: "settings" });
+    await wrapper.get("[data-testid=export-backup]").trigger("click");
+    await flush();
+    await flush();
+    expect(wrapper.get("[data-testid=export-error]").text()).toBe("請求太頻繁，請稍後再試。");
+    expect(create).not.toHaveBeenCalled();
+    expect(saved).toEqual([]);
+    expect(wrapper.find("[data-testid=export-message]").exists()).toBe(false);
+    restore();
   });
 });

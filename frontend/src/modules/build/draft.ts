@@ -88,3 +88,28 @@ export function saveDraft(
 ): void {
   storage.set(draftKey(templates, deps), JSON.stringify(draft));
 }
+
+/** 設定頁「切換產業範本」清除後，帶著選好的範本前往自訂建置。 */
+export function switchLocation(config: { industry: string; company: string; modules: string[] }) {
+  return {
+    path: "/custom",
+    query: { industry: config.industry, company: config.company.trim(), modules: config.modules.join(",") },
+  };
+}
+
+/** 由路由參數還原預選設定；與草稿同一套嚴格驗證，不合格時回傳 null。 */
+export function draftFromQuery(
+  query: Record<string, unknown>,
+  industryIds: readonly string[],
+  deps: Deps = MODULE_DEPENDENCIES,
+): BuilderDraft | null {
+  const { industry, company, modules } = query;
+  if (typeof industry !== "string" || typeof modules !== "string") return null;
+  const raw = JSON.stringify({
+    industry,
+    company: typeof company === "string" ? company : "",
+    modules: modules === "" ? [] : modules.split(","),
+    destination: "public",
+  });
+  return parseDraft(raw, industryIds, deps);
+}
