@@ -508,7 +508,7 @@ def _available(p: dict[str, Any]) -> int:
 def _expired(expires_at: Any, now: datetime) -> bool:
     try:
         return datetime.fromisoformat(str(expires_at)) <= now
-    except ValueError:
+    except (ValueError, TypeError):  # 格式不符，或沒有時區而無法與目前時間比較
         return True
 
 

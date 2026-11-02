@@ -128,8 +128,8 @@ def test_cannot_skip_step_409(api: ApiClient) -> None:
     assert api.snapshot() == before
     # 不存在的步驟
     assert _error(_execute(api, "sales", "nope")) == (422, "learning_step_invalid")
-    # 還沒開始的路線
-    assert _error(_execute(api, "manufacturing", "fund-business"))[0] in (403, 409)
+    # 還沒開始的路線（retail 沒有製造模組，模組閘先擋）
+    assert _error(_execute(api, "manufacturing", "fund-business")) == (403, "module_disabled")
     assert api.snapshot() == before
 
 
@@ -322,3 +322,17 @@ def test_execute_oversized_body_413(api: ApiClient) -> None:
         },
     )
     assert _error(r) == (413, "body_limit")
+
+
+def test_expired_tolerates_naive_and_invalid_times() -> None:
+    """報價期限格式不符（含沒有時區、無法與目前時間比較）一律視為已失效，不拋例外。"""
+    from datetime import UTC, datetime
+
+    from src.modules.learning.paths import _expired
+
+    now = datetime(2026, 11, 2, tzinfo=UTC)
+    assert _expired("2026-11-01T00:00:00.000Z", now) is True
+    assert _expired("2026-11-03T00:00:00.000Z", now) is False
+    assert _expired("2026-11-03T00:00:00", now) is True
+    assert _expired("not a date", now) is True
+    assert _expired(None, now) is True

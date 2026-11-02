@@ -327,7 +327,8 @@ def filter_rows(desk: Desk, p: ViewParams) -> list[dict[str, Any]]:
             and status_is(r["status"])
         ]
         return _sorted(rows, "start_at", reverse=True)
-    # notices：全體公告不受單位篩選影響；發布中的置頂公告在前，其餘依更新時間由新到舊
+    # notices：全體公告（unit_id 為 null）不受單位篩選影響；發布中的置頂公告排在前面，
+    # 兩組內各自依更新時間由新到舊（穩定排序保留先前的時間順序）
     rows = [
         r
         for r in desk["notices"]
@@ -446,6 +447,8 @@ PEOPLE_REASON = "先新增使用中組織與假員工。"
 
 
 def onboarding(desk: Desk) -> dict[str, Any]:
+    """入門路線三步：使用中組織、使用中組織內的使用中假員工、任一未取消班次（不限週次）。
+    前一步未完成時，下一步的 reason 說明原因；三步都完成後 open 為 false。"""
     has_unit = bool(desk.active_unit_ids)
     has_staff = bool(desk.active_staff())
     steps = [
@@ -494,6 +497,8 @@ def onboarding(desk: Desk) -> dict[str, Any]:
 
 
 def overview(desk: Desk, now: datetime, week: str, unit: str | None) -> dict[str, Any]:
+    """待辦概覽四格：待整理與待補件申請、目前可用設備、選定週出勤差異人數（依 unit 篩選）、
+    最近一則尚未截止的發布中公告；另附入門路線與各分頁筆數。"""
     requests = desk["requests"]
     submitted = sum(1 for r in requests if r["status"] == "submitted")
     returned = sum(1 for r in requests if r["status"] == "returned")
