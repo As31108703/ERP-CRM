@@ -2,11 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request
 
-# sales 依賴 inventory 與 wallets：先匯入它們的 router 以確保先登錄，一致性檢查（流水先於
-# 訂單）與還原（錢包、商品先於訂單）才會依正確順序執行
-from src.modules.inventory import router as _inventory_router  # noqa: F401
 from src.modules.sales import invariants, service, snapshot
-from src.modules.wallets import router as _wallets_router  # noqa: F401
 from src.platform import records, registry
 from src.platform.pipeline import CommandPipeline, MutationResponse, get_pipeline, raw_body
 from src.platform.records import Handler

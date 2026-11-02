@@ -9,6 +9,7 @@ from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
 from src.modules.catalog.router import router as catalog_router
+from src.modules.crm.router import router as crm_router
 from src.modules.inventory.router import router as inventory_router
 from src.modules.sales.router import router as sales_router
 from src.modules.wallets.router import router as wallets_router
@@ -37,11 +38,12 @@ ROUTERS: list[APIRouter] = [
     health_router,
     catalog_router,
     workspace_router,
-    # 匯入 router 時一併登錄模組（快照、一致性檢查、seed）；依 wallets、inventory、sales
-    # 的順序登錄，還原時訂單才找得到錢包與商品
+    # 匯入 router 時一併登錄模組（快照、一致性檢查、seed）。登錄先後不影響執行順序：
+    # 快照、一致性檢查與還原依 registry.SPEC_ORDER，seed 依 register_seeder 的 order
     wallets_router,
     inventory_router,
     sales_router,
+    crm_router,
 ]
 
 

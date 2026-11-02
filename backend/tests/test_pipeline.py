@@ -535,3 +535,32 @@ def test_registry_constants_and_register(monkeypatch):
     registry.register(b)
     registry.register(a)  # 重複註冊同名模組會取代，不會重複
     assert [s.name for s in registry.all_specs()] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["sales", "crm", "inventory", "wallets", "zeta"],
+        ["zeta", "administration", "projects", "manufacturing", "services", "wallets"],
+        ["crm", "wallets", "alpha", "sales", "zeta", "inventory"],
+    ],
+)
+def test_all_specs_order_independent_of_import(monkeypatch, names):
+    """不論模組匯入（登錄）先後，快照、一致性檢查與還原都依固定的模組順序；
+    不在固定清單中的模組排在最後，彼此維持登錄順序。"""
+    monkeypatch.setattr(registry, "_SPECS", {})
+    for name in names:
+        registry.register(registry.ModuleSpec(name, lambda _d, _w: {}, lambda _d, _w, _x: None))
+    fixed = [n for n in registry.SPEC_ORDER if n in names]
+    others = [n for n in names if n not in registry.SPEC_ORDER]
+    assert [s.name for s in registry.all_specs()] == fixed + others
+    assert registry.SPEC_ORDER == (
+        "inventory",
+        "wallets",
+        "sales",
+        "crm",
+        "services",
+        "manufacturing",
+        "projects",
+        "administration",
+    )
