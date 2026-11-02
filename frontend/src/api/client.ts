@@ -150,6 +150,18 @@ function prepare(method: MutateMethod, path: string, body: unknown): PendingOper
   return op;
 }
 
+/**
+ * 偏好寫入（例如教學路線的開始、暫停與閱讀位置）：只帶 csrf，不帶冪等鍵與版本號，
+ * 不存 pending，也不會改變工作區版本。
+ */
+export function preference<T>(method: MutateMethod, path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method,
+    headers: { Accept: "application/json", "Content-Type": "application/json", "x-csrf-token": session.csrf },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
 export interface UploadHandlers {
   /** 上傳進度（位元組）；瀏覽器無法計算總量時 total 為 0。 */
   onProgress?: (loaded: number, total: number) => void;

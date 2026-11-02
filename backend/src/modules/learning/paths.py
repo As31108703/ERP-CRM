@@ -135,7 +135,7 @@ SALES = LearningPath(
     headline="把一筆訂單，走到出貨。",
     intro="先備好商品和測試幣，再看訂單如何保留庫存、收款與出貨。每一步都會留下可以核對的紀錄。",
     outcome="你會看見：付款不會移動庫存，出貨才會扣除 FIFO 成本層。",
-    nodes=("wallet", "inventory", "order", "inventory"),
+    nodes=("wallet", "inventory", "order", "shipment"),
     steps=(
         _s(
             "customer",
@@ -207,7 +207,7 @@ SALES = LearningPath(
             "付款完成後，把本筆訂單的一件商品出貨。",
             "庫存與預留各減一件，出貨成本採 FIFO。",
             "sales",
-            "inventory",
+            "shipment",
         ),
     ),
     quiz=Quiz(
@@ -236,7 +236,7 @@ MANUFACTURING = LearningPath(
         "看庫存數量和材料成本如何一起移動。"
     ),
     outcome="你會看見：備料保留材料，完工才消耗材料，並把成本帶進成品。",
-    nodes=("inventory", "bom", "production", "inventory"),
+    nodes=("inventory", "bom", "production", "finished"),
     steps=(
         _s(
             "fund-business",
@@ -290,7 +290,7 @@ MANUFACTURING = LearningPath(
             "依 FIFO 消耗材料，將成本完整轉入一件成品。",
             "材料減少、成品增加；測試幣流水不因製作改動。",
             "manufacturing",
-            "inventory",
+            "finished",
         ),
     ),
     quiz=Quiz(

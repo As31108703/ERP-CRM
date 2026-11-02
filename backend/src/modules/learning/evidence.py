@@ -55,7 +55,9 @@ class Evaluation(TypedDict):
     complete: bool
 
 
-Fact = dict[str, str]
+# label、value 為顯示文字；node 為這列所屬的流程示意圖節點 id（對應 path.nodes），
+# 不屬於任何節點時為 None
+Fact = dict[str, str | None]
 
 
 # --- 讀值 -------------------------------------------------------------------------------------
@@ -457,8 +459,17 @@ def evaluate(db: Session, ws_id: str, session: LearningSessionRow) -> Evaluation
 # --- 讀值面板 ---------------------------------------------------------------------------------
 
 
-def _fact(label: str, value: str) -> Fact:
-    return {"label": label, "value": value}
+def _fact(label: str, value: str, node: str | None = None) -> Fact:
+    return {"label": label, "value": value, "node": node}
+
+
+def _wallet_nodes(path_id: str) -> tuple[str | None, str | None]:
+    """商家與買家測試幣列的節點：示意圖沒有測試幣節點時兩者皆無；銷售路線的測試幣節點
+    代表買家付款，其他路線代表商家收款。"""
+    path = PATHS.get(path_id)
+    if path is None or "wallet" not in path.nodes:
+        return None, None
+    return (None, "wallet") if path_id == "sales" else ("wallet", None)
 
 
 def _sum(items: Iterable[dict[str, Any]], key: str) -> int:
@@ -491,9 +502,10 @@ def facts(w: World, run: Run, scope: str = "lesson") -> list[Fact]:
         and buyer_row.get("kind") == "buyer"
         else None
     )
+    business_node, buyer_node = _wallet_nodes(run.path)
     common = [
-        _fact("共用商家測試幣", business),
-        _fact("本輪買家測試幣", money((buyer or {}).get("balance_minor") or 0)),
+        _fact("共用商家測試幣", business, business_node),
+        _fact("本輪買家測試幣", money((buyer or {}).get("balance_minor") or 0), buyer_node),
     ]
     own_customer = customer is not None and customer.get("name") == own_name(run, "客戶")
 
@@ -514,11 +526,17 @@ def facts(w: World, run: Run, scope: str = "lesson") -> list[Fact]:
         suffix = f" · {product['name']}" if product else ""
         return [
             _fact("本輪顧客", f"{1 if own_customer else 0} 位"),
-            _fact("本輪訂單", f"{1 if own else 0} 筆"),
-            _fact("本輪訂單已付款", money((own or {}).get("paid_minor") or 0)),
-            _fact("本輪已出貨", f"{_sum((own or {}).get('lines') or [], 'shipped_quantity')} 件"),
-            _fact(f"共用商品現有量{suffix}", f"{(product or {}).get('on_hand') or 0} 件"),
-            _fact("共用商品預留", f"{(product or {}).get('reserved') or 0} 件"),
+            _fact("本輪訂單", f"{1 if own else 0} 筆", "order"),
+            _fact("本輪訂單已付款", money((own or {}).get("paid_minor") or 0), "order"),
+            _fact(
+                "本輪已出貨",
+                f"{_sum((own or {}).get('lines') or [], 'shipped_quantity')} 件",
+                "shipment",
+            ),
+            _fact(
+                f"共用商品現有量{suffix}", f"{(product or {}).get('on_hand') or 0} 件", "inventory"
+            ),
+            _fact("共用商品預留", f"{(product or {}).get('reserved') or 0} 件", "inventory"),
             *common,
         ]
     if run.path == "service":
@@ -542,12 +560,15 @@ def facts(w: World, run: Run, scope: str = "lesson") -> list[Fact]:
         )
         own_quote = q is not None and own_case is not None and q.get("case_id") == own_case["id"]
         return [
-            _fact("本輪案件", f"{1 if own_case else 0} 件"),
-            _fact("本輪報價", f"{1 if own_quote else 0} 份"),
-            _fact("本輪交付版本", f"{len((own_service or {}).get('deliveries') or [])} 份"),
+            _fact("本輪案件", f"{1 if own_case else 0} 件", "case"),
+            _fact("本輪報價", f"{1 if own_quote else 0} 份", "quote"),
+            _fact(
+                "本輪交付版本", f"{len((own_service or {}).get('deliveries') or [])} 份", "delivery"
+            ),
             _fact(
                 "本輪已驗收服務",
                 f"{1 if own_service and own_service.get('status') == 'accepted' else 0} 件",
+                "service",
             ),
             _fact("本輪服務收款", money((own_service or {}).get("paid_minor") or 0)),
             *common,
@@ -577,29 +598,34 @@ def facts(w: World, run: Run, scope: str = "lesson") -> list[Fact]:
     finished = row(w["products"], (bom or {}).get("product_id"))
     completed = own is not None and own.get("status") == "completed"
     return [
-        _fact("本輪工單", f"{1 if own else 0} 張"),
-        _fact("本輪完工數量", f"{own['quantity'] if completed and own else 0} 件"),
+        _fact("本輪工單", f"{1 if own else 0} 張", "production"),
+        _fact("本輪完工數量", f"{own['quantity'] if completed and own else 0} 件", "production"),
         _fact(
-            "本輪完工成本", money(((own or {}).get("actual_cost_minor") or 0) if completed else 0)
+            "本輪完工成本",
+            money(((own or {}).get("actual_cost_minor") or 0) if completed else 0),
+            "production",
         ),
         _fact(
             f"共用材料現有量{' · ' + material['name'] if material else ''}",
             f"{(material or {}).get('on_hand') or 0} 件",
+            "inventory",
         ),
         _fact(
             f"共用成品現有量{' · ' + finished['name'] if finished else ''}",
             f"{(finished or {}).get('on_hand') or 0} 件",
+            "finished",
         ),
-        _fact("共用材料預留", f"{(material or {}).get('reserved') or 0} 件"),
+        _fact("共用材料預留", f"{(material or {}).get('reserved') or 0} 件", "inventory"),
         _fact("共用商家測試幣", business),
     ]
 
 
 def _workspace_facts(w: World, run: Run, business: str) -> list[Fact]:
     buyers = (v for v in w["wallets"] if v.get("kind") == "buyer")
+    business_node, buyer_node = _wallet_nodes(run.path)
     common = [
-        _fact("工作區商家測試幣", business),
-        _fact("工作區買家測試幣", money(_sum(buyers, "balance_minor"))),
+        _fact("工作區商家測試幣", business, business_node),
+        _fact("工作區買家測試幣", money(_sum(buyers, "balance_minor")), buyer_node),
     ]
     products = w["products"]
     if run.path == "sales":
@@ -607,11 +633,11 @@ def _workspace_facts(w: World, run: Run, business: str) -> list[Fact]:
         shipped = sum(_sum(o.get("lines") or [], "shipped_quantity") for o in orders)
         return [
             _fact("工作區顧客", f"{len(w['customers'])} 位"),
-            _fact("工作區商品現有量", f"{_sum(products, 'on_hand')} 件"),
-            _fact("工作區預留庫存", f"{_sum(products, 'reserved')} 件"),
-            _fact("工作區訂單", f"{len(orders)} 筆"),
-            _fact("工作區訂單已付款", money(_sum(orders, "paid_minor"))),
-            _fact("工作區已出貨", f"{shipped} 件"),
+            _fact("工作區商品現有量", f"{_sum(products, 'on_hand')} 件", "inventory"),
+            _fact("工作區預留庫存", f"{_sum(products, 'reserved')} 件", "inventory"),
+            _fact("工作區訂單", f"{len(orders)} 筆", "order"),
+            _fact("工作區訂單已付款", money(_sum(orders, "paid_minor")), "order"),
+            _fact("工作區已出貨", f"{shipped} 件", "shipment"),
             *common,
         ]
     if run.path == "service":
@@ -619,33 +645,39 @@ def _workspace_facts(w: World, run: Run, business: str) -> list[Fact]:
         deliveries = sum(len(v.get("deliveries") or []) for v in services)
         accepted = sum(1 for v in services if v.get("status") == "accepted")
         return [
-            _fact("工作區案件", f"{len(w['cases'])} 件"),
-            _fact("工作區報價", f"{len(w['quotes'])} 份"),
-            _fact("工作區交付版本", f"{deliveries} 份"),
-            _fact("工作區已驗收服務", f"{accepted} 件"),
+            _fact("工作區案件", f"{len(w['cases'])} 件", "case"),
+            _fact("工作區報價", f"{len(w['quotes'])} 份", "quote"),
+            _fact("工作區交付版本", f"{deliveries} 份", "delivery"),
+            _fact("工作區已驗收服務", f"{accepted} 件", "service"),
             _fact("工作區服務收款", money(_sum(services, "paid_minor"))),
             *common,
         ]
     completed = [v for v in w["work_orders"] if v.get("status") == "completed"]
     return [
-        _fact("工作區庫存現有量", f"{_sum(products, 'on_hand')} 件"),
-        _fact("工作區預留庫存", f"{_sum(products, 'reserved')} 件"),
-        _fact("工作區庫存成本", money(_sum(products, "stock_value_minor"))),
-        _fact("工作區 BOM 版本", f"{len(w['boms'])} 份"),
-        _fact("工作區完工工單", f"{len(completed)} 張"),
-        _fact("工作區完工數量", f"{_sum(completed, 'quantity')} 件"),
+        _fact("工作區庫存現有量", f"{_sum(products, 'on_hand')} 件", "inventory"),
+        _fact("工作區預留庫存", f"{_sum(products, 'reserved')} 件", "inventory"),
+        _fact("工作區庫存成本", money(_sum(products, "stock_value_minor")), "inventory"),
+        _fact("工作區 BOM 版本", f"{len(w['boms'])} 份", "bom"),
+        _fact("工作區完工工單", f"{len(completed)} 張", "production"),
+        _fact("工作區完工數量", f"{_sum(completed, 'quantity')} 件", "finished"),
         *common,
     ]
 
 
-def snapshot_rows(before: list[Fact], after: list[Fact]) -> list[dict[str, str]]:
-    """前後讀值對照：以標籤「 ·」之前的文字配對，找不到時為「—」，至多 12 列。"""
+def snapshot_rows(before: list[Fact], after: list[Fact]) -> list[dict[str, str | None]]:
+    """前後讀值對照：以標籤「 ·」之前的文字配對，找不到時為「—」，至多 12 列。
+    node 取自操作後的讀值；本欄位加入前保存的檢查點沒有 node，視為 None。"""
 
     def key(label: str) -> str:
         return label.split(" ·")[0]
 
-    previous = {key(f["label"]): f["value"] for f in before}
+    previous = {key(f["label"] or ""): f["value"] for f in before}
     return [
-        {"label": f["label"], "before": previous.get(key(f["label"]), "—"), "after": f["value"]}
+        {
+            "label": f["label"],
+            "before": previous.get(key(f["label"] or ""), "—"),
+            "after": f["value"],
+            "node": f.get("node"),
+        }
         for f in after[:FACT_ROWS_MAX]
     ]

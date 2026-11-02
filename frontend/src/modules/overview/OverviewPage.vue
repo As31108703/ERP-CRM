@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { get } from "../../api/client";
+import type { LearningListing } from "../../api/types";
 import { formatDateTime, formatSim } from "../../lib/format";
 import { MODULE_USES, moduleLabel } from "../../lib/modules";
 import { rowsOf } from "../../lib/records";
@@ -34,6 +36,18 @@ const metrics = computed(() => [
   { id: "profit", label: "模擬毛利", value: formatSim(reportMinor("gross_profit_minor")), unit: "" },
 ]);
 
+/** 教學入口卡：展開時才讀取可用路線數，讀不到就只顯示入口。 */
+const learningPaths = ref<number | null>(null);
+async function loadLearning(open: boolean): Promise<void> {
+  if (!open || learningPaths.value !== null) return;
+  try {
+    const list = await get<LearningListing>("/api/v1/learning");
+    learningPaths.value = Array.isArray(list?.available_paths) ? list.available_paths.length : null;
+  } catch {
+    learningPaths.value = null;
+  }
+}
+
 const retention = computed(() =>
   store.view?.expires_at
     ? `公開 SIM 試用 · 一段時間未使用會自動清除，目前期限：${formatDateTime(store.view.expires_at)}`
@@ -55,12 +69,15 @@ const retention = computed(() =>
     <FirstRunGuide />
     <RoleCenter />
 
-    <details class="ov__more">
+    <details class="ov__more" @toggle="loadLearning(($event.target as HTMLDetailsElement).open)">
       <summary>更多數據與流程教學</summary>
       <div class="ov__more-body">
         <div class="ov__learn">
           <h3 class="ov-tile__title">流程教學</h3>
           <p class="ov-tile__text">跟著步驟完成一筆完整流程，每一步都由你確認。</p>
+          <p v-if="learningPaths !== null" class="ov-tile__text" data-testid="learning-path-count">
+            {{ learningPaths > 0 ? `目前可用 ${learningPaths} 條教學路線` : "已啟用的模組還不足以組成完整教學路線" }}
+          </p>
           <button type="button" class="btn" @click="ui.navigateModule('learning')">開始流程教學 →</button>
         </div>
         <dl class="ov__metrics">

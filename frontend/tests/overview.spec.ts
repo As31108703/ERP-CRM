@@ -150,7 +150,7 @@ describe("first-run guide", () => {
       { id: "operation", label: "完成模擬操作", done: false },
     ],
     route: { module: "inventory", title: "整理你的商品", description: "查看示範商品。", action: "查看我的商品" },
-    learning_available: true,
+    learning_available: 2,
   };
 
   it("renders server progress, navigates and remembers the collapsed state", async () => {
@@ -186,6 +186,15 @@ describe("first-run guide", () => {
     const { wrapper } = await mountOverview(FirstRunGuide, workspace());
     expect(wrapper.find("[data-testid=first-run-guide]").exists()).toBe(false);
     expect(wrapper.get("[data-testid=first-run-reopen]").text()).toContain("開啟上手引導");
+  });
+});
+
+describe("first-run learning entry", () => {
+  it("hides the learning entry when no learning path is available", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { progress: [], route: null, learning_available: 0 })));
+    const { wrapper } = await mountOverview(FirstRunGuide, workspace());
+    await flush();
+    expect(wrapper.find("[data-testid=first-run-learning]").exists()).toBe(false);
   });
 });
 

@@ -139,7 +139,8 @@ export interface FirstRunRoute {
 export interface FirstRun {
   progress: FirstRunItem[];
   route: FirstRunRoute | null;
-  learning_available?: boolean;
+  /** 可用的教學路線數；0 代表沒有。 */
+  learning_available?: number;
 }
 
 /** 寫入命令的一般回應：`result` 為新紀錄 id 或 null，其餘為 view 欄位。 */
@@ -148,3 +149,98 @@ export interface MutationResult extends Partial<WorkspaceView> {
   replayed?: boolean;
   receipt?: { version: number };
 }
+
+/** 流程教學（Task 17 端點）。 */
+export type LearningPathId = "sales" | "manufacturing" | "service";
+export type LearningScope = "lesson" | "workspace";
+
+/** 讀值；node 為所屬的流程示意圖節點 id（對應 `path.nodes`），不屬於任何節點時為 null。 */
+export interface LearningFact {
+  label: string;
+  value: string;
+  node: string | null;
+}
+
+export interface LearningCheckpoint {
+  action: string;
+  payload: Record<string, unknown>;
+  result: string;
+  version: number;
+}
+
+export interface LearningSession {
+  id: string;
+  path: LearningPathId;
+  run_id: string;
+  active: boolean;
+  paused: boolean;
+  scope: LearningScope;
+  compact: boolean;
+  quiz_choice: 0 | 1 | 2 | null;
+  selected_step: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LearningStepEval {
+  id: string;
+  complete: boolean;
+  evidence_text: string;
+  checkpoint: LearningCheckpoint | null;
+}
+
+export interface LearningEvaluation {
+  steps: LearningStepEval[];
+  /** 第一個未完成步驟；全部完成時等於步驟數。 */
+  next_index: number;
+  complete: boolean;
+}
+
+export interface LearningSnapshot {
+  version: number;
+  result: string;
+  rows: { label: string; before: string; after: string; node: string | null }[];
+}
+
+export interface LearningStepDef {
+  id: string;
+  action: string;
+  title: string;
+  body: string;
+  change: string;
+  nav: string;
+  node: string;
+}
+
+export interface LearningPathDef {
+  id: LearningPathId;
+  title: string;
+  subtitle: string;
+  modules: string[];
+  headline: string;
+  intro: string;
+  outcome: string;
+  nodes: string[];
+  steps: LearningStepDef[];
+  quiz: { question: string; choices: string[]; answer: number; explanation: string };
+}
+
+export interface LearningDetail {
+  path: LearningPathDef;
+  session: LearningSession | null;
+  evaluation: LearningEvaluation;
+  /** 只針對 next_index 那一步；兩者恰有一個非 null。 */
+  preview: { text: string | null; blocked_reason: string | null };
+  facts: Record<LearningScope, LearningFact[]>;
+  snapshots: Record<string, LearningSnapshot>;
+}
+
+export interface LearningListing {
+  available_paths: LearningPathId[];
+  sessions: { path: LearningPathId; run_id: string; confirmed: number; total: number }[];
+  active: LearningPathId | null;
+  /** 全部路線與所需模組；available 表示目前工作區的模組是否齊全。 */
+  paths: { id: LearningPathId; title: string; modules: string[]; available: boolean }[];
+}
+
+export type LearningViewPatch = Partial<Pick<LearningSession, "paused" | "scope" | "compact" | "quiz_choice" | "selected_step">>;

@@ -54,9 +54,42 @@ def _assert_complete(detail: dict[str, Any], total: int) -> None:
     assert set(detail["snapshots"]) == {s["id"] for s in evaluation["steps"]}
     for snapshot in detail["snapshots"].values():
         assert 0 < len(snapshot["rows"]) <= 12
-        assert set(snapshot["rows"][0]) == {"label", "before", "after"}
+        assert set(snapshot["rows"][0]) == {"label", "before", "after", "node"}
+    _assert_fact_nodes(detail)
     assert detail["preview"]["text"] is None
     assert detail["preview"]["blocked_reason"] == "本次教學已完成，請開始另一輪練習。"
+
+
+def _assert_fact_nodes(detail: dict[str, Any]) -> None:
+    """每列讀值都帶 node：非 null 時必為路線示意圖的節點；每個節點至少有一列讀值，
+    且「整個工作區」範圍涵蓋全部節點。前後讀值的 node 也只能是示意圖節點或 null。"""
+    nodes = set(detail["path"]["nodes"])
+    covered: set[str] = set()
+    for scope in ("lesson", "workspace"):
+        facts = detail["facts"][scope]
+        assert all(set(f) == {"label", "value", "node"} for f in facts), facts
+        tagged = {f["node"] for f in facts if f["node"] is not None}
+        assert tagged <= nodes, (scope, tagged - nodes)
+        covered |= tagged
+    assert covered == nodes
+    assert {f["node"] for f in detail["facts"]["workspace"]} >= nodes
+    for snapshot in detail["snapshots"].values():
+        assert {r["node"] for r in snapshot["rows"]} <= nodes | {None}
+
+
+@pytest.mark.parametrize("path_id", sorted(PATHS))
+def test_diagram_nodes_unique_and_steps_resolvable(path_id: str) -> None:
+    path = PATHS[path_id]
+    assert len(set(path.nodes)) == len(path.nodes)
+    # 步驟的 node 若在示意圖上，必定只對應一個節點（不屬於示意圖的步驟例如建立顧客則不標示）
+    for step in path.steps:
+        assert path.nodes.count(step.node) <= 1
+
+
+def test_fact_nodes_before_start(api: ApiClient) -> None:
+    api.setup("retail")
+    for path_id in api.get(LEARNING).json()["available_paths"]:
+        _assert_fact_nodes(_detail(api, path_id))
 
 
 def test_sales_path_full_run(api: ApiClient) -> None:
@@ -76,6 +109,8 @@ def test_sales_path_full_run(api: ApiClient) -> None:
     rows = {r["label"]: r for r in detail["snapshots"]["order"]["rows"]}
     assert rows["本輪訂單"]["before"] == "0 筆"
     assert rows["本輪訂單"]["after"] == "1 筆"
+    assert rows["本輪訂單"]["node"] == "order"
+    assert rows["本輪已出貨"]["node"] == "shipment"
     labels = [f["label"].split(" ·")[0] for f in detail["facts"]["lesson"]]
     assert labels[:2] == ["本輪顧客", "本輪訂單"]
     assert detail["facts"]["workspace"][0]["label"] == "工作區顧客"
@@ -144,6 +179,12 @@ def test_paths_filtered_by_modules(api: ApiClient) -> None:
     api.setup("service")
     listing = api.get(LEARNING).json()
     assert listing["available_paths"] == ["service"]
+    catalog = {p["id"]: p for p in listing["paths"]}
+    assert set(catalog) == set(PATHS)
+    for path_id, path in PATHS.items():
+        assert catalog[path_id]["modules"] == list(path.modules)
+        assert catalog[path_id]["title"] == path.title
+        assert catalog[path_id]["available"] is (path_id == "service")
     assert listing["sessions"] == []
     assert listing["active"] == "service"
     assert _error(api.mutate("POST", f"{LEARNING}/sales/start")) == (403, "module_disabled")
@@ -239,3 +280,12 @@ def test_learning_cascades_with_workspace(api: ApiClient) -> None:
     api.setup("retail")
     listing = api.get(LEARNING).json()
     assert listing["sessions"] == []
+
+
+def test_listing_without_workspace_lists_requirements(api: ApiClient) -> None:
+    r = api.get(LEARNING)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available_paths"] == [] and body["sessions"] == [] and body["active"] is None
+    assert [p["id"] for p in body["paths"]] == list(PATHS)
+    assert all(p["available"] is False and p["modules"] for p in body["paths"])
