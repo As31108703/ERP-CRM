@@ -70,8 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # 公開展示模式才啟用 72 小時保留排程
-        app.state.scheduler = start_scheduler(engine) if settings.app.public_demo else None
+        # 兩種模式都清除從未寫入的 session；72 小時保留只在公開展示模式
+        app.state.scheduler = start_scheduler(engine, public_demo=settings.app.public_demo)
         try:
             yield
         finally:

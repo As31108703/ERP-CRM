@@ -10,7 +10,7 @@
 - **不是會計或稅務系統**：沒有真實稅額、發票、會計科目或財務報表。「模擬報表」只是依工作區紀錄即時計算的練習數字。錢包流水採雙分錄，總和恆為 0，用來練習核對，不能當作帳務依據。
 - **行政工作台只用合成資料**：排班、出勤、申請與設備借用都只是練習，不能當作薪資、准假、採購或付款的依據。
 - **沒有帳號與權限**：每個瀏覽器以 `erpcrm_session` cookie（HttpOnly、SameSite=Strict）對應一個工作區。沒有登入、角色或權限控管。清除 cookie 或換一個瀏覽器，就會拿到新的空白工作區。
-- **資料保留**：公開試用模式（`APP__PUBLIC_DEMO=true`）下，工作區 72 小時沒有存取就會整筆自動刪除。後端每 10 分鐘清理一次，cookie 的 Max-Age 為 259200 秒。自架模式（預設）的資料永久保留，cookie 的 Max-Age 為 31536000 秒（365 天）。
+- **資料保留**：公開試用模式（`APP__PUBLIC_DEMO=true`）下，工作區 72 小時沒有存取就會整筆自動刪除。後端每 10 分鐘清理一次，cookie 的 Max-Age 為 259200 秒。自架模式（預設）的資料永久保留，cookie 的 Max-Age 為 31536000 秒（365 天）。兩種模式都會清掉從未寫入（版本 0、沒有工作區）且 24 小時沒有存取的 session。
 - **筆數與大小上限**：
   - 每個集合（商品、訂單、客戶等）最多 500 筆，超過時回 `record_limit`。操作歷史不計入這個上限。
   - 每筆命令的明細（`lines`）為 1 到 50 行；客戶等 CRM 紀錄的文字內容合計最多 4000 字。
@@ -107,7 +107,7 @@
 │    services projects manufacturing      │
 │    administration learning backup       │
 │    reports workbench workspace catalog  │
-│  APScheduler：公開試用時每 10 分鐘清理  │
+│  APScheduler：每 10 分鐘清理 session    │
 └─────────────────────────────────────────┘
                  │  psycopg 3／SQLAlchemy 2
                  ▼
@@ -203,7 +203,8 @@ curl http://localhost:8080/api/health
 | 項目 | 公開試用（`APP__PUBLIC_DEMO=true`） | 自架（`APP__PUBLIC_DEMO=false`，預設） |
 | --- | --- | --- |
 | 資料保留 | 72 小時沒有存取就整筆刪除，持續使用會自動延後 | 永久保留 |
-| 自動清理 | 啟動 APScheduler，每 10 分鐘清理一次；多個實例時以 advisory lock 確保只有一個執行 | 不啟動 |
+| 自動清理 | 每 10 分鐘清理：72 小時沒有存取的工作區，以及從未寫入且 24 小時沒有存取的 session | 每 10 分鐘只清理從未寫入（版本 0、沒有工作區）且 24 小時沒有存取的 session |
+| 清理排程 | APScheduler；多個實例時以 advisory lock 確保只有一個執行 | 同左 |
 | cookie Max-Age | 259200（72 小時） | 31536000（365 天） |
 | `APP__AUTO_SETUP` | 一律忽略，每位訪客都從建置精靈開始 | 可開啟：第一次進站就以 `APP__DEFAULT_*` 自動建立工作區 |
 | 建置精靈的公司名稱 | 不預填 | 預填 `APP__DEFAULT_COMPANY` |
