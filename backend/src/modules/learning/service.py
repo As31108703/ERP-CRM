@@ -257,10 +257,18 @@ def detail(ctx: CommandContext, path_id: str) -> dict[str, Any]:
     }
 
 
+def _catalog(available: list[str]) -> list[dict[str, Any]]:
+    """全部路線與所需模組（沒有可用路線時，前端據此說明要啟用哪些模組）。"""
+    return [
+        {"id": p.id, "title": p.title, "modules": list(p.modules), "available": p.id in available}
+        for p in PATHS.values()
+    ]
+
+
 def listing(ctx: CommandContext) -> dict[str, Any]:
     """`GET /api/v1/learning`：可用路線、各路線目前這一輪的進度，以及建議接續的路線。"""
     if ctx.workspace is None:
-        return {"available_paths": [], "sessions": [], "active": None}
+        return {"available_paths": [], "sessions": [], "active": None, "paths": _catalog([])}
     workspace = ctx.workspace
     available = _paths_for(list(workspace.modules))
     current: dict[str, LearningSessionRow] = {}
@@ -295,7 +303,12 @@ def listing(ctx: CommandContext) -> dict[str, Any]:
         active_path = max(runs, key=last_version)
     if active_path is None and available:
         active_path = available[0]
-    return {"available_paths": available, "sessions": sessions, "active": active_path}
+    return {
+        "available_paths": available,
+        "sessions": sessions,
+        "active": active_path,
+        "paths": _catalog(available),
+    }
 
 
 # --- 偏好寫入（不經過命令管線） ----------------------------------------------------------------

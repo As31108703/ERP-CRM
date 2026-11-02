@@ -36,13 +36,6 @@ export const ROUTE_GLYPHS: Record<LearningPathId, { code: string; glyph: string 
   service: { code: "RT-03 · RELAY", glyph: "✓" },
 };
 
-/** 沒有可用路線時說明各路線所需模組。 */
-export const PATH_REQUIREMENTS = [
-  "商品銷售：需要 CRM、商品庫存、訂單與測試幣。",
-  "服務交付：需要 CRM、服務與測試幣。",
-  "材料製造：需要商品庫存、製造與測試幣。",
-] as const;
-
 /**
  * 流程示意圖節點的顯示名稱、符號與沒有讀值時的說明（以後端 `path.nodes` 的 id 為鍵）。
  * 未列出的 id 直接顯示 id。

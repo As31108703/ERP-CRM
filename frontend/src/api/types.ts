@@ -239,6 +239,8 @@ export interface LearningListing {
   available_paths: LearningPathId[];
   sessions: { path: LearningPathId; run_id: string; confirmed: number; total: number }[];
   active: LearningPathId | null;
+  /** 全部路線與所需模組；available 表示目前工作區的模組是否齊全。 */
+  paths: { id: LearningPathId; title: string; modules: string[]; available: boolean }[];
 }
 
 export type LearningViewPatch = Partial<Pick<LearningSession, "paused" | "scope" | "compact" | "quiz_choice" | "selected_step">>;

@@ -9,6 +9,7 @@ import type {
   LearningSession,
   LearningViewPatch,
 } from "../../api/types";
+import { moduleLabel } from "../../lib/modules";
 import { modulePath, targetLocation } from "../../lib/records";
 import { useWorkspaceStore } from "../../stores/workspace";
 import EmptyState from "../../ui/EmptyState.vue";
@@ -27,7 +28,6 @@ import {
   currentNodeIndex,
   LEARNING_API,
   NOTICES,
-  PATH_REQUIREMENTS,
   recordTarget,
   scopeLabel,
 } from "./learning";
@@ -219,7 +219,8 @@ async function restart(): Promise<void> {
 async function updateView(patch: LearningViewPatch, success = ""): Promise<void> {
   const id = selected.value;
   const d = detail.value;
-  if (!id || !d) return;
+  // 另一個寫入進行中時不接受新的偏好，避免先翻轉畫面又被回應蓋掉
+  if (!id || !d || localBusy.value) return;
   if (!d.session) {
     Object.assign(localView, patch);
     if (success) notice.value = success;
@@ -330,7 +331,9 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.("change", onMotion));
     <HudPanel v-if="listing && !listing.available_paths.length" title="先啟用一條完整工作流程" code="NO-ROUTE" tone="warn">
       <EmptyState title="目前沒有可用的教學路線" text="教學路線需要對應的模組全部啟用：">
         <ul class="studio__reqs">
-          <li v-for="r in PATH_REQUIREMENTS" :key="r">{{ r }}</li>
+          <li v-for="p in listing.paths ?? []" :key="p.id" :data-testid="`learning-requirement-${p.id}`">
+            {{ p.title }}：需要{{ p.modules.map(moduleLabel).join("、") }}。
+          </li>
         </ul>
         <div class="studio__row">
           <button type="button" class="btn" @click="goTo('/settings')">查看模組設定</button>
@@ -344,22 +347,28 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.("change", onMotion));
 
       <div class="studio__tools">
         <div class="segmented" role="group" aria-label="教學資料範圍">
-          <button type="button" data-testid="learning-scope-lesson" :aria-pressed="view.scope === 'lesson'" @click="updateView({ scope: 'lesson' })">
+          <button
+            type="button"
+            data-testid="learning-scope-lesson"
+            :aria-pressed="view.scope === 'lesson'"
+            :disabled="busy"
+            @click="updateView({ scope: 'lesson' })">
             本輪練習
           </button>
           <button
             type="button"
             data-testid="learning-scope-workspace"
             :aria-pressed="view.scope === 'workspace'"
+            :disabled="busy"
             @click="updateView({ scope: 'workspace' })"
           >
             整個工作區
           </button>
         </div>
-        <button type="button" class="btn btn--sm" data-testid="learning-compact" :aria-pressed="view.compact" @click="updateView({ compact: !view.compact })">
+        <button type="button" class="btn btn--sm" data-testid="learning-compact" :aria-pressed="view.compact" :disabled="busy" @click="updateView({ compact: !view.compact })">
           {{ view.compact ? "展開教學畫面" : "精簡教學畫面" }}
         </button>
-        <button type="button" class="btn btn--sm" :data-testid="view.paused ? 'learning-resume' : 'learning-pause'" @click="togglePause">
+        <button type="button" class="btn btn--sm" :data-testid="view.paused ? 'learning-resume' : 'learning-pause'" :disabled="busy" @click="togglePause">
           {{ view.paused ? "繼續教學 ▷" : "暫停教學 ⏸" }}
         </button>
         <button
@@ -457,6 +466,7 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.("change", onMotion));
             :quiz="detail.path.quiz"
             :path-id="detail.path.id"
             :choice="view.quiz_choice"
+            :disabled="busy"
             @choose="(i) => updateView({ quiz_choice: i as 0 | 1 | 2 })"
           />
         </HudPanel>

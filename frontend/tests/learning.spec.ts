@@ -121,7 +121,8 @@ async function mountStudio(body: ReturnType<typeof detail>) {
   await router.push("/learning");
   await router.isReady();
   const wrapper = mount(LearningStudio, { global: { plugins: [router] }, attachTo: document.body });
-  await vi.waitFor(() => expect(wrapper.find("[data-testid=learning-execute]").exists()).toBe(true));
+  // 手機寬度時操作列會被 Teleport 到 body，因此從 document 查
+  await vi.waitFor(() => expect(document.body.querySelector("[data-testid=learning-execute]")).not.toBeNull());
   await flush();
   return { wrapper, fetchMock, store };
 }
@@ -198,7 +199,17 @@ describe("learning studio commands", () => {
   it("shows the empty state when no path is available", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => json(200, { available_paths: [], sessions: [], active: null })),
+      vi.fn(async () =>
+        json(200, {
+          available_paths: [],
+          sessions: [],
+          active: null,
+          paths: [
+            { id: "sales", title: "把第一筆訂單送出去", modules: ["crm", "wallets", "inventory", "sales"], available: false },
+            { id: "service", title: "完成一件服務委託", modules: ["crm", "services", "wallets"], available: false },
+          ],
+        }),
+      ),
     );
     setActivePinia(createPinia());
     const store = useWorkspaceStore();
@@ -210,6 +221,9 @@ describe("learning studio commands", () => {
     const wrapper = mount(LearningStudio, { global: { plugins: [router] } });
     await vi.waitFor(() => expect(wrapper.text()).toContain("先啟用一條完整工作流程"));
     expect(wrapper.text()).toContain("查看模組設定");
+    // 所需模組來自後端的路線清單
+    expect(wrapper.get("[data-testid=learning-requirement-sales]").text()).toContain("把第一筆訂單送出去：需要");
+    expect(wrapper.get("[data-testid=learning-requirement-service]").text()).toContain("完成一件服務委託");
     expect(wrapper.find("[data-testid=learning-execute]").exists()).toBe(false);
   });
 });
@@ -233,5 +247,51 @@ describe("learning flow diagram", () => {
     await flush();
     expect(node("shipment").text()).toContain("工作區已出貨 3 件");
     expect(node("order").text()).toContain("本輪尚無對應紀錄");
+  });
+});
+
+describe("learning studio layout and locking", () => {
+  it("teleports the action dock out of the HUD panels at mobile width", async () => {
+    const listeners: (() => void)[] = [];
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 760px)",
+        media: query,
+        addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+        removeEventListener: () => undefined,
+      })),
+    );
+    const { wrapper } = await mountStudio(detail());
+    const dock = document.body.querySelector("[data-testid=learning-action-dock]");
+    expect(dock).not.toBeNull();
+    expect(dock?.closest(".hud")).toBeNull();
+    expect(dock?.parentElement).toBe(document.body);
+    expect(wrapper.find("[data-testid=learning-action-dock]").exists()).toBe(false);
+  });
+
+  it("keeps the dock inside the scene on wide screens", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: false, media: query, addEventListener: () => undefined, removeEventListener: () => undefined })));
+    const { wrapper } = await mountStudio(detail());
+    expect(wrapper.find("[data-testid=learning-scene] [data-testid=learning-action-dock]").exists()).toBe(true);
+  });
+
+  it("disables preference toggles while a write is in flight", async () => {
+    const { wrapper, fetchMock } = await mountStudio(detail());
+    let release: (r: Response) => void = () => undefined;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (release = resolve)));
+    await wrapper.get("[data-testid=learning-pause]").trigger("click");
+    await flush();
+    for (const id of ["learning-scope-lesson", "learning-scope-workspace", "learning-compact", "learning-resume", "learning-quiz-choice-0"]) {
+      expect(wrapper.get(`[data-testid=${id}]`).attributes("disabled"), id).toBeDefined();
+    }
+    await wrapper.get("[data-testid=learning-scope-workspace]").trigger("click");
+    await flush();
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/view"))).toHaveLength(1);
+
+    release(json(200, detail({ paused: true })));
+    await flush();
+    expect(wrapper.get("[data-testid=learning-resume]").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid=learning-scope-lesson]").attributes("aria-pressed")).toBe("true");
   });
 });

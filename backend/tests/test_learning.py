@@ -179,6 +179,12 @@ def test_paths_filtered_by_modules(api: ApiClient) -> None:
     api.setup("service")
     listing = api.get(LEARNING).json()
     assert listing["available_paths"] == ["service"]
+    catalog = {p["id"]: p for p in listing["paths"]}
+    assert set(catalog) == set(PATHS)
+    for path_id, path in PATHS.items():
+        assert catalog[path_id]["modules"] == list(path.modules)
+        assert catalog[path_id]["title"] == path.title
+        assert catalog[path_id]["available"] is (path_id == "service")
     assert listing["sessions"] == []
     assert listing["active"] == "service"
     assert _error(api.mutate("POST", f"{LEARNING}/sales/start")) == (403, "module_disabled")
@@ -274,3 +280,12 @@ def test_learning_cascades_with_workspace(api: ApiClient) -> None:
     api.setup("retail")
     listing = api.get(LEARNING).json()
     assert listing["sessions"] == []
+
+
+def test_listing_without_workspace_lists_requirements(api: ApiClient) -> None:
+    r = api.get(LEARNING)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available_paths"] == [] and body["sessions"] == [] and body["active"] is None
+    assert [p["id"] for p in body["paths"]] == list(PATHS)
+    assert all(p["available"] is False and p["modules"] for p in body["paths"])

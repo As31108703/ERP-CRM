@@ -2,7 +2,7 @@
 import type { LearningPathDef } from "../../api/types";
 
 /** 先想想：答題只用來理解流程，不阻擋實作，也不修改工作區。 */
-defineProps<{ quiz: LearningPathDef["quiz"]; pathId: string; choice: number | null }>();
+defineProps<{ quiz: LearningPathDef["quiz"]; pathId: string; choice: number | null; disabled?: boolean }>();
 defineEmits<{ choose: [index: number] }>();
 </script>
 
@@ -17,6 +17,7 @@ defineEmits<{ choose: [index: number] }>();
           type="radio"
           :name="`learning-quiz-${pathId}`"
           :checked="choice === i"
+          :disabled="disabled"
           :data-testid="`learning-quiz-choice-${i}`"
           @change="$emit('choose', i)"
         />
