@@ -6,6 +6,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 SECURITY_HEADERS: dict[str, str] = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    # API 只回 JSON，不允許載入任何資源或被嵌入頁框
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 }
 
 

@@ -7,6 +7,7 @@ from src.config.settings import Settings
 from src.core.db import make_engine
 from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
+from src.middleware.session import SessionCookieMiddleware
 
 APP_NAME = "erpcrm"
 APP_VERSION = "0.1.0"
@@ -45,6 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SessionCookieMiddleware)
     register_error_handlers(app)
     for router in ROUTERS:
         app.include_router(router)
