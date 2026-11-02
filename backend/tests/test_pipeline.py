@@ -99,6 +99,33 @@ def test_malformed_cookie_gets_new_session(client):
     assert re.fullmatch(r"[0-9a-f]{64}", r.cookies["erpcrm_session"])
 
 
+@pytest.mark.parametrize("sibling", ['x={"k":1}', "x=a b", 'x="unterminated', "x=\\bad"])
+def test_malformed_sibling_cookie_keeps_session(client, sibling):
+    # 其他網站寫入的非 RFC 嚴格 cookie 不能讓 session 遺失，否則工作區消失且寫入一律 csrf_invalid
+    first = client.get("/api/v1/_test/csrf")
+    token = first.cookies["erpcrm_session"]
+    client.cookies.clear()
+    header = {"Cookie": f"{sibling}; erpcrm_session={token}"}
+    again = client.get("/api/v1/_test/csrf", headers=header)
+    assert again.status_code == 200
+    assert f"erpcrm_session={token};" in _set_cookie(again)
+    assert again.json()["csrf"] == first.json()["csrf"]
+    client.cookies.clear()
+    state = again.json()
+    r = client.post(
+        ECHO,
+        json={},
+        headers={
+            **header,
+            "Origin": "http://testserver",
+            "x-csrf-token": state["csrf"],
+            "Idempotency-Key": new_key(),
+            "If-Match-Version": str(state["version"]),
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
 def test_csp_header_on_api_responses(client):
     r = client.get("/api/v1/_test/csrf")
     assert r.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"

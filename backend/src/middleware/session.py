@@ -8,10 +8,9 @@
 
 import hashlib
 import re
-from http.cookies import SimpleCookie
 
 from starlette.datastructures import Headers, MutableHeaders
-from starlette.requests import Request
+from starlette.requests import Request, cookie_parser
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.config.settings import Settings
@@ -40,15 +39,12 @@ def _read_token(headers: Headers) -> str | None:
     raw = headers.get("cookie")
     if not raw:
         return None
-    jar: SimpleCookie = SimpleCookie()
-    try:
-        jar.load(raw)
-    except Exception:  # 格式錯誤的 cookie 視同沒有
+    # 用與瀏覽器相容的寬鬆解析：SimpleCookie 遇到同站其他不合 RFC 的 cookie
+    # 會整串放棄，導致 session 權杖遺失
+    token = cookie_parser(raw).get(COOKIE_NAME)
+    if token is None or _TOKEN_RE.fullmatch(token) is None:
         return None
-    morsel = jar.get(COOKIE_NAME)
-    if morsel is None or _TOKEN_RE.fullmatch(morsel.value) is None:
-        return None
-    return morsel.value
+    return token
 
 
 def _first(value: str | None) -> str:
