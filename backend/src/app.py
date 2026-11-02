@@ -8,6 +8,7 @@ from src.core.db import make_engine
 from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
+from src.modules.administration.router import router as administration_router
 from src.modules.catalog.router import router as catalog_router
 from src.modules.workspace.retention import start_scheduler
 from src.modules.workspace.router import router as workspace_router
@@ -34,6 +35,7 @@ ROUTERS: list[APIRouter] = [
     health_router,
     catalog_router,
     workspace_router,
+    administration_router,
 ]
 
 
