@@ -13,6 +13,7 @@ const DesignStudio = () => import("./modules/design/DesignStudio.vue");
 const PAGES: Record<string, () => Promise<unknown>> = {
   design: DesignStudio,
   overview: () => import("./modules/overview/OverviewPage.vue"),
+  learning: () => import("./modules/learning/LearningStudio.vue"),
   build: () => import("./modules/build/BuildWizard.vue"),
   custom: () => import("./modules/build/CustomSetup.vue"),
   capabilities: () => import("./modules/capabilities/CapabilityMap.vue"),

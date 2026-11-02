@@ -39,7 +39,8 @@ function normalize(raw: unknown): FirstRun | null {
   return {
     progress: Array.isArray(r.progress) ? r.progress.filter(isItem) : [],
     route: isRoute(r.route) ? r.route : null,
-    learning_available: r.learning_available !== false,
+    // 後端回可用教學路線數（0 代表沒有）；舊格式的布林值照舊接受
+    learning_available: typeof r.learning_available === "number" ? r.learning_available > 0 : r.learning_available !== false,
   };
 }
 
