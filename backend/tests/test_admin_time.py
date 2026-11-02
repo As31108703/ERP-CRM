@@ -2,7 +2,7 @@
 
 import copy
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -242,6 +242,24 @@ def test_void_frees_slot_and_excluded_from_minutes(api: ApiClient, db_engine: En
 
 
 # --- 附理由更正 ---------------------------------------------------------------------
+
+
+def test_clock_step_back_keeps_time_monotonic(
+    api: ApiClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """系統時鐘倒退（WSL 實測約 1.5 秒）時，同一工作區的時間不倒退，更正仍成功。"""
+    t0 = datetime(2026, 11, 2, 0, 0, tzinfo=UTC)
+    current = [t0]
+    monkeypatch.setattr(clock, "utcnow", lambda: current[0])
+    unit, staff = _base(api)
+    shift = _shift(api, unit, staff, "2026-11-03", "09:00", "17:00")
+    current[0] = t0 + timedelta(seconds=10)
+    api.ok("PATCH", f"{SHIFTS}/{shift}", {"reason": "第一次", "note": "一"})
+    current[0] = t0 + timedelta(seconds=8, milliseconds=500)
+    api.ok("PATCH", f"{SHIFTS}/{shift}", {"reason": "第二次", "note": "二"})
+    first, second = _adm(api)["changes"]
+    assert second["at"] >= first["at"] == "2026-11-02T00:00:10.000Z"
+    assert _by_id(_adm(api)["shifts"], shift)["updated_at"] == second["at"]
 
 
 def test_correction_keeps_before_after(api: ApiClient) -> None:

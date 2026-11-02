@@ -92,6 +92,17 @@ def lock_session(db: Session, token: str, now: datetime) -> WorkspaceSessionRow:
     return row
 
 
+def session_now(row: WorkspaceSessionRow) -> datetime:
+    """取得鎖之後讀取的目前時間，且不早於該 session 最後存取時間。
+
+    系統時鐘可能倒退（WSL 實測約 1.5 秒）；同一 session 的請求依鎖序執行，
+    取最大值讓時間對每個工作區單調不減，更正與申請紀錄的時間順序規則才不會誤判。
+    """
+    now = clock.utcnow()
+    last = row.last_seen_at
+    return max(now, last) if last is not None else now
+
+
 def load_workspace(db: Session, session_id: uuid.UUID) -> WorkspaceRow | None:
     stmt = (
         select(WorkspaceRow)
@@ -108,9 +119,9 @@ def _settings(request: Request) -> Settings:
 def touch_session(request: Request) -> Iterator[CommandContext]:
     """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，再交出唯讀用的 context。"""
     with Session(request.app.state.engine, expire_on_commit=False) as db:
-        now = clock.utcnow()
         try:
-            row = lock_session(db, session_token(request), now)
+            row = lock_session(db, session_token(request), clock.utcnow())
+            now = session_now(row)
             ratelimit.hit(row, now)
             db.commit()
         except BaseException:
@@ -178,7 +189,7 @@ class CommandPipeline:
                 # 1–2：解析並鎖住 session 列
                 row = lock_session(db, token, clock.utcnow())
                 # 鎖可能等了一段時間，之後的步驟以取得鎖之後的時間為準
-                now = clock.utcnow()
+                now = session_now(row)
                 # 3：速率限制；計數在 SAVEPOINT 之外，後續步驟失敗也會保留
                 ratelimit.hit(row, now)
                 db.flush()
