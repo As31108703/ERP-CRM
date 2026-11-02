@@ -1,6 +1,6 @@
 import type { WorkspaceSnapshot } from "../../api/types";
-import { formatSim, simInput } from "../../lib/format";
-import { num, recordName, rowsOf, type Row } from "../../lib/records";
+import { formatSim, localInputToIso, simInput } from "../../lib/format";
+import { findRow, num, recordName, rowsOf, statusLabel, type Rec, type Row } from "../../lib/records";
 import type { FormField } from "../../ui/FormDialog.vue";
 import {
   API_V1,
@@ -14,17 +14,34 @@ import {
 } from "./commandForm";
 
 /**
- * 頁面上的「新增」表單（F§2 快速新增的五種業務紀錄）。Task 21 的快速新增對話框可直接沿用。
+ * 「新增」表單（F§2 快速新增的八種紀錄），模組頁與工作總覽的快速新增共用。
  * 金額欄位以 SIM 輸入，送出前換算 minor。
  */
-export type CreateKind = "customer" | "product" | "wallet" | "order" | "service";
+export type CreateKind = "customer" | "product" | "order" | "wallet" | "service" | "workOrder" | "task" | "milestone";
 
+/** 快速新增的順序與所屬模組。 */
 export const CREATE_MODULE: Record<CreateKind, string> = {
   customer: "crm",
   product: "inventory",
-  wallet: "wallets",
   order: "sales",
+  wallet: "wallets",
   service: "services",
+  workOrder: "manufacturing",
+  task: "projects",
+  milestone: "projects",
+};
+
+export const CREATE_KINDS = Object.keys(CREATE_MODULE) as CreateKind[];
+
+export const CREATE_NAMES: Record<CreateKind, string> = {
+  customer: "新增客戶",
+  product: "新增商品",
+  order: "建立訂單",
+  wallet: "新增買家錢包",
+  service: "建立服務",
+  workOrder: "新增製造工單",
+  task: "新增任務",
+  milestone: "新增里程碑",
 };
 
 export function buyerWallets(ws: WorkspaceSnapshot | null | undefined): Row[] {
@@ -43,6 +60,7 @@ export function createBlocker(kind: CreateKind, ws: WorkspaceSnapshot | null | u
     if (!rowsOf(ws, "products").some((p) => p.active !== false && availableOf(p) > 0)) return "先準備可用商品庫存";
   }
   if (kind === "service" && rowsOf(ws, "cases").length === 0) return "先建立客戶案件";
+  if (kind === "workOrder" && rowsOf(ws, "boms").length === 0) return "先建立 BOM";
   return null;
 }
 
@@ -80,8 +98,94 @@ function orderBuild(products: Row[]) {
   };
 }
 
+// ── 製造 ─────────────────────────────────────────────
+
+/** BOM 選單文字：成品名稱與版次。 */
+export function bomLabel(ws: WorkspaceSnapshot | null | undefined, bom: Rec): string {
+  return `${recordName(findRow(ws, "products", bom.product_id), "商品")} · 第 ${num(bom, "revision") || 1} 版`;
+}
+
+export function workOrderSpec(ws: WorkspaceSnapshot | null | undefined): CommandFormSpec {
+  return {
+    title: "新增製造工單",
+    fields: [
+      {
+        name: "bom_id",
+        label: "BOM 配方",
+        type: "select",
+        required: true,
+        options: rowsOf(ws, "boms").map((b) => ({ value: b.id, label: bomLabel(ws, b) })),
+      },
+      { name: "quantity", label: "製作數量", type: "number", required: true, min: 1 },
+    ],
+    initial: { quantity: 1 },
+    submitLabel: "建立工單",
+    build: (v) => {
+      const qty = readQty(v, "quantity", "製作數量");
+      if (isError(qty)) return qty.error;
+      return { method: "POST", path: `${API_V1}/manufacturing/work-orders`, body: { bom_id: v.bom_id, quantity: qty } };
+    },
+  };
+}
+
+// ── 專案（任務與里程碑） ───────────────────────────────
+
+export type ProjectKind = "task" | "milestone";
+
+export const PROJECT_COLLECTION: Record<ProjectKind, string> = { task: "tasks", milestone: "milestones" };
+export const PROJECT_LABEL: Record<ProjectKind, string> = { task: "任務", milestone: "里程碑" };
+
+export function projectStatusOptions(kind: ProjectKind, current = ""): { value: string; label: string }[] {
+  const values = ["todo", "in_progress", "done", ...(kind === "milestone" ? ["planned"] : [])];
+  if (current && !values.includes(current)) values.push(current);
+  return values.map((v) => ({ value: v, label: statusLabel(v) }));
+}
+
+/** 共用欄位轉換：空白到期時間送 null，其餘以本地時間換算 ISO。 */
+export function readProjectCommon(
+  v: FormValues,
+): { title: string; status: string; due_at: string | null; notes: string } | string {
+  const raw = String(v.due_at ?? "");
+  const due = raw === "" ? null : localInputToIso(raw);
+  if (raw !== "" && due === null) return "到期時間格式不正確。";
+  return { title: String(v.title), status: String(v.status), due_at: due, notes: String(v.notes ?? "") };
+}
+
+export function projectFields(kind: ProjectKind, current = ""): FormField[] {
+  return [
+    { name: "title", label: "標題", required: true, maxlength: 200 },
+    { name: "status", label: "狀態", type: "select", required: true, options: projectStatusOptions(kind, current) },
+    { name: "due_at", label: "到期時間", type: "datetime-local", hint: "留白表示未設定" },
+    { name: "notes", label: "備註", type: "textarea" },
+  ];
+}
+
+export function projectCreateSpec(kind: ProjectKind, ws: WorkspaceSnapshot | null | undefined): CommandFormSpec {
+  const cases = rowsOf(ws, "cases");
+  const fields = projectFields(kind);
+  if (cases.length) fields.push({ name: "case_id", label: "關聯案件（選填）", type: "select", options: options(cases, "案件") });
+  return {
+    title: `新增${PROJECT_LABEL[kind]}`,
+    fields,
+    initial: { status: kind === "task" ? "todo" : "planned" },
+    submitLabel: `建立${PROJECT_LABEL[kind]}`,
+    build: (v) => {
+      const common = readProjectCommon(v);
+      if (typeof common === "string") return common;
+      const body: Record<string, unknown> = { ...common };
+      if (typeof v.case_id === "string" && v.case_id !== "") body.case_id = v.case_id;
+      return { method: "POST", path: `${API_V1}/projects/${PROJECT_COLLECTION[kind]}`, body };
+    },
+  };
+}
+
 export function createSpec(kind: CreateKind, ws: WorkspaceSnapshot | null | undefined): CommandFormSpec {
   switch (kind) {
+    case "workOrder":
+      return workOrderSpec(ws);
+    case "task":
+    case "milestone":
+      return projectCreateSpec(kind, ws);
     case "customer":
       return {
         title: "新增客戶",

@@ -8,7 +8,7 @@ import type { FormField } from "../../ui/FormDialog.vue";
 import RecordCard from "../../ui/RecordCard.vue";
 import { API_V1, isError, readQty, useCommandForm, type CommandFormSpec } from "../shared/commandForm";
 import CommandDialog from "../shared/CommandDialog.vue";
-import { options } from "../shared/createForms";
+import { bomLabel as sharedBomLabel, options, workOrderSpec as createWorkOrderSpec } from "../shared/createForms";
 import PageHead from "../shared/PageHead.vue";
 import { usePage } from "../shared/usePage";
 
@@ -27,7 +27,7 @@ function productName(id: unknown): string {
 }
 
 function bomLabel(bom: Rec): string {
-  return `${productName(bom.product_id)} · 第 ${num(bom, "revision") || 1} 版`;
+  return sharedBomLabel(ws.value, bom);
 }
 
 function bomSpec(): CommandFormSpec {
@@ -57,26 +57,7 @@ function bomSpec(): CommandFormSpec {
 }
 
 function workOrderSpec(): CommandFormSpec {
-  return {
-    title: "新增製造工單",
-    fields: [
-      {
-        name: "bom_id",
-        label: "BOM 配方",
-        type: "select",
-        required: true,
-        options: boms.value.map((b) => ({ value: b.id, label: bomLabel(b) })),
-      },
-      { name: "quantity", label: "製作數量", type: "number", required: true, min: 1 },
-    ],
-    initial: { quantity: 1 },
-    submitLabel: "建立工單",
-    build: (v) => {
-      const qty = readQty(v, "quantity", "製作數量");
-      if (isError(qty)) return qty.error;
-      return { method: "POST", path: `${API_V1}/manufacturing/work-orders`, body: { bom_id: v.bom_id, quantity: qty } };
-    },
-  };
+  return createWorkOrderSpec(ws.value);
 }
 
 const path = (w: Row, action: string) => `${API_V1}/manufacturing/work-orders/${encodeURIComponent(w.id)}/${action}`;

@@ -11,6 +11,7 @@ const Placeholder = () => import("./views/PlaceholderView.vue");
 const DesignStudio = () => import("./modules/design/DesignStudio.vue");
 const PAGES: Record<string, () => Promise<unknown>> = {
   design: DesignStudio,
+  overview: () => import("./modules/overview/OverviewPage.vue"),
   build: () => import("./modules/build/BuildWizard.vue"),
   custom: () => import("./modules/build/CustomSetup.vue"),
   capabilities: () => import("./modules/capabilities/CapabilityMap.vue"),

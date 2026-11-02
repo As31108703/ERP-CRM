@@ -58,13 +58,88 @@ export interface TargetRef {
   id: string;
 }
 
+/** 操作提示（F§2 Operation hints）。 */
+export interface Readiness {
+  summary: string;
+  blockers: { message: string; target: TargetRef }[];
+}
+
+/** 待處理工作（F§2 Pending work queue）；attention 排在前面。 */
+export interface QueueItem {
+  id: string;
+  target: TargetRef;
+  title: string;
+  description: string;
+  priority: "attention" | "next";
+  label: string;
+}
+
+/** 角色卡（F§5）：模組啟用才出現；target 為該種類第一筆符合的紀錄。 */
+export interface RoleCard {
+  id: string;
+  label: string;
+  module: string;
+  count: number;
+  unit: string;
+  description: string;
+  target?: TargetRef | null;
+}
+
+/** 角色流程：步驟只會開啟頁面。後端可回 `{module, label}` 或單純的模組字串。 */
+export interface RoleFlow {
+  id?: string;
+  title: string;
+  description?: string;
+  steps: ({ module: string; label?: string } | string)[];
+}
+
+export interface RoleModel {
+  available: boolean;
+  cards: RoleCard[];
+  flow: RoleFlow | null;
+}
+
+export type RoleViewId = "owner" | "sales" | "operations" | "administration";
+
 export interface Workbench {
-  readiness: Record<string, { summary: string; blockers: { message: string; target: TargetRef }[] }>;
-  queue: { id: string; target: TargetRef; title: string; description: string; priority: number; label: string }[];
-  roles: Record<
-    string,
-    { available: boolean; cards: unknown[]; flow: { title: string; steps: unknown[] } }
-  >;
+  readiness: Record<string, Readiness>;
+  queue: QueueItem[];
+  roles: Partial<Record<RoleViewId, RoleModel>>;
+}
+
+/** GET /api/v1/workbench/search：只含已啟用模組的紀錄。 */
+export interface SearchItem {
+  module: string;
+  kind: string;
+  id: string;
+  title: string;
+  description: string;
+  status_label?: string | null;
+}
+
+export interface SearchResponse {
+  total: number;
+  items: SearchItem[];
+}
+
+/** GET /api/v1/workbench/first-run：三項上手進度與起點路線（F§4）。 */
+export interface FirstRunItem {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+export interface FirstRunRoute {
+  module: string;
+  title: string;
+  description: string;
+  action: string;
+}
+
+export interface FirstRun {
+  progress: FirstRunItem[];
+  route: FirstRunRoute | null;
+  learning_available?: boolean;
 }
 
 /** 寫入命令的一般回應：`result` 為新紀錄 id 或 null，其餘為 view 欄位。 */

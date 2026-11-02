@@ -1,17 +1,30 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RouterView } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import { pendingStorageVolatile } from "./api/pending";
+import GlobalSearch from "./modules/overview/GlobalSearch.vue";
+import QuickCreate from "./modules/overview/QuickCreate.vue";
+import { useUiStore } from "./stores/ui";
 import { useWorkspaceStore } from "./stores/workspace";
 import AppShell from "./ui/AppShell.vue";
 import Toast from "./ui/Toast.vue";
 
 const store = useWorkspaceStore();
+const ui = useUiStore();
+const route = useRoute();
+const router = useRouter();
 const volatile = computed(() => store.pending !== null && pendingStorageVolatile());
+const targeted = computed(() => route.name === "module" && typeof route.query.target === "string" && route.query.target !== "");
+
+function clearTarget(): void {
+  const query = { ...route.query };
+  delete query.target;
+  void router.replace({ query });
+}
 </script>
 
 <template>
-  <AppShell>
+  <AppShell @search="ui.openSearch()" @quick-create="ui.openQuickCreate()">
     <template #notices>
       <template v-if="store.loaded">
         <Toast v-if="store.error" tone="danger" title="操作尚未完成">
@@ -27,6 +40,12 @@ const volatile = computed(() => store.pending !== null && pendingStorageVolatile
             <button type="button" class="btn btn--sm" :disabled="store.busy" @click="store.retry()">確認原操作結果</button>
           </template>
         </Toast>
+        <Toast v-if="targeted" tone="info" data-testid="target-notice">
+          已定位到指定紀錄，篩選已清除。
+          <template #actions>
+            <button type="button" class="btn btn--sm" data-testid="target-clear" @click="clearTarget">清除定位</button>
+          </template>
+        </Toast>
       </template>
     </template>
     <p v-if="!store.loaded" class="app-loading">
@@ -34,6 +53,10 @@ const volatile = computed(() => store.pending !== null && pendingStorageVolatile
       準備你的測試工作區
     </p>
     <RouterView v-else />
+    <template v-if="store.loaded && store.hasWorkspace">
+      <GlobalSearch />
+      <QuickCreate />
+    </template>
   </AppShell>
 </template>
 

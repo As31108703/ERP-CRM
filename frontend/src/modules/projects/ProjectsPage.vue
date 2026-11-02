@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { formatDateTime, localInputToIso, toLocalInput } from "../../lib/format";
+import { formatDateTime, toLocalInput } from "../../lib/format";
 import { findRow, recordName, statusKey, statusLabel, str, type Row } from "../../lib/records";
 import DataSection from "../../ui/DataSection.vue";
 import EmptyState from "../../ui/EmptyState.vue";
-import type { FormField } from "../../ui/FormDialog.vue";
 import RecordCard from "../../ui/RecordCard.vue";
-import { API_V1, useCommandForm, type CommandFormSpec, type FormValues } from "../shared/commandForm";
+import { API_V1, useCommandForm, type CommandFormSpec } from "../shared/commandForm";
 import CommandDialog from "../shared/CommandDialog.vue";
-import { options } from "../shared/createForms";
+import {
+  PROJECT_COLLECTION,
+  PROJECT_LABEL,
+  projectCreateSpec,
+  projectFields,
+  readProjectCommon,
+  type ProjectKind,
+} from "../shared/createForms";
 import PageHead from "../shared/PageHead.vue";
 import { usePage } from "../shared/usePage";
 
-type Kind = "task" | "milestone";
+type Kind = ProjectKind;
 
-const COLLECTION: Record<Kind, string> = { task: "tasks", milestone: "milestones" };
-const LABEL: Record<Kind, string> = { task: "任務", milestone: "里程碑" };
 const CLOSED = ["done", "completed", "cancelled"];
 
 const { store, ws, resetKey, rows, enabled, readiness, targetId, clearTarget, searchText } = usePage();
@@ -23,12 +27,6 @@ const form = useCommandForm();
 
 const tasks = computed(() => rows("tasks"));
 const milestones = computed(() => rows("milestones"));
-
-function statusOptions(kind: Kind, current = ""): { value: string; label: string }[] {
-  const values = ["todo", "in_progress", "done", ...(kind === "milestone" ? ["planned"] : [])];
-  if (current && !values.includes(current)) values.push(current);
-  return values.map((v) => ({ value: v, label: statusLabel(v) }));
-}
 
 function caseTitle(row: Row): string {
   const c = findRow(ws.value, "cases", row.case_id);
@@ -45,52 +43,20 @@ function dueInput(row: Row): string {
   return Number.isNaN(due) ? "" : toLocalInput(due);
 }
 
-/** 共用欄位轉換：空白到期時間送 null，其餘以本地時間換算 ISO。 */
-function readCommon(v: FormValues): { title: string; status: string; due_at: string | null; notes: string } | string {
-  const raw = String(v.due_at ?? "");
-  const due = raw === "" ? null : localInputToIso(raw);
-  if (raw !== "" && due === null) return "到期時間格式不正確。";
-  return { title: String(v.title), status: String(v.status), due_at: due, notes: String(v.notes ?? "") };
-}
-
-function baseFields(kind: Kind, current = ""): FormField[] {
-  return [
-    { name: "title", label: "標題", required: true, maxlength: 200 },
-    { name: "status", label: "狀態", type: "select", required: true, options: statusOptions(kind, current) },
-    { name: "due_at", label: "到期時間", type: "datetime-local", hint: "留白表示未設定" },
-    { name: "notes", label: "備註", type: "textarea" },
-  ];
-}
-
 function createSpec(kind: Kind): CommandFormSpec {
-  const cases = rows("cases");
-  const fields = baseFields(kind);
-  if (cases.length) fields.push({ name: "case_id", label: "關聯案件（選填）", type: "select", options: options(cases, "案件") });
-  return {
-    title: `新增${LABEL[kind]}`,
-    fields,
-    initial: { status: kind === "task" ? "todo" : "planned" },
-    submitLabel: `建立${LABEL[kind]}`,
-    build: (v) => {
-      const common = readCommon(v);
-      if (typeof common === "string") return common;
-      const body: Record<string, unknown> = { ...common };
-      if (typeof v.case_id === "string" && v.case_id !== "") body.case_id = v.case_id;
-      return { method: "POST", path: `${API_V1}/projects/${COLLECTION[kind]}`, body };
-    },
-  };
+  return projectCreateSpec(kind, ws.value);
 }
 
 function updateSpec(kind: Kind, row: Row): CommandFormSpec {
   return {
-    title: `更新${LABEL[kind]}進度`,
-    fields: baseFields(kind, str(row, "status")),
+    title: `更新${PROJECT_LABEL[kind]}進度`,
+    fields: projectFields(kind, str(row, "status")),
     initial: { title: str(row, "title"), status: str(row, "status"), due_at: dueInput(row), notes: str(row, "notes") },
     submitLabel: "儲存進度",
     build: (v) => {
-      const common = readCommon(v);
+      const common = readProjectCommon(v);
       if (typeof common === "string") return common;
-      return { method: "PATCH", path: `${API_V1}/projects/${COLLECTION[kind]}/${encodeURIComponent(row.id)}`, body: common };
+      return { method: "PATCH", path: `${API_V1}/projects/${PROJECT_COLLECTION[kind]}/${encodeURIComponent(row.id)}`, body: common };
     },
   };
 }
@@ -140,7 +106,7 @@ const SECTIONS = computed(() => [
       >
         <template #item="{ item }">
           <RecordCard :kind="s.kind" :row="item" :readiness="readiness(s.kind, item.id)">
-            <template #title>{{ recordName(item, LABEL[s.kind]) }}</template>
+            <template #title>{{ recordName(item, PROJECT_LABEL[s.kind]) }}</template>
             <p class="mpage__dim">{{ caseTitle(item) }}<template v-if="str(item, 'notes')"> · {{ str(item, "notes") }}</template></p>
             <p v-if="str(item, 'due_at')" class="proj__due" :class="{ overdue: overdue(item) }">
               到期：<span class="num">{{ formatDateTime(item.due_at) }}</span><template v-if="overdue(item)"> · 已逾期</template>
