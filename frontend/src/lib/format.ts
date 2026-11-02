@@ -69,7 +69,7 @@ const DATE_TIME = new Intl.DateTimeFormat("zh-TW", {
   hour12: false,
 });
 
-/** ISO 時間以台北時區顯示，例如「2026/11/02 00:30」。無法解析時顯示「—」。 */
+/** ISO 時間以臺北時區顯示，例如「2026/11/02 00:30」。無法解析時顯示「—」。 */
 export function formatDateTime(iso: unknown): string {
   if (typeof iso !== "string") return "—";
   const ms = Date.parse(iso);

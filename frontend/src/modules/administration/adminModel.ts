@@ -1,6 +1,6 @@
 /**
- * 行政工作台的共用模型（A§5、A§7）：分頁、狀態篩選、狀態文字、台北時間換算與週次計算。
- * 行政頁所有時間一律以台北時間（UTC+08:00）顯示與輸入，週一為一週第一天。
+ * 行政工作台的共用模型（A§5、A§7）：分頁、狀態篩選、狀態文字、臺北時間換算與週次計算。
+ * 行政頁所有時間一律以臺北時間（UTC+08:00）顯示與輸入，週一為一週第一天。
  */
 import type { Rec, Row } from "../../lib/records";
 
@@ -160,7 +160,7 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-// ── 台北時間 ─────────────────────────────────────────────
+// ── 臺北時間 ─────────────────────────────────────────────
 
 const TAIPEI_OFFSET_MS = 8 * 3600_000;
 const DAY_MS = 86_400_000;
@@ -173,20 +173,20 @@ function toMs(value: unknown): number {
   return Date.parse(value);
 }
 
-/** 台北牆上時間的 ISO 片段（`YYYY-MM-DDTHH:MM`）。 */
+/** 臺北牆上時間的 ISO 片段（`YYYY-MM-DDTHH:MM`）。 */
 function taipeiParts(value: unknown): string {
   const ms = toMs(value);
   if (Number.isNaN(ms)) return "";
   return new Date(ms + TAIPEI_OFFSET_MS).toISOString().slice(0, 16);
 }
 
-/** ISO → `<input type="datetime-local">` 的台北時間值；無法解析時回傳空字串。 */
+/** ISO → `<input type="datetime-local">` 的臺北時間值；無法解析時回傳空字串。 */
 export function isoToTaipeiInput(value: unknown): string {
   return taipeiParts(value);
 }
 
 /**
- * 台北時間輸入 → 分鐘對齊、帶 `+08:00` 的 ISO。格式不符、日期溢位（例如 2 月 30 日）
+ * 臺北時間輸入 → 分鐘對齊、帶 `+08:00` 的 ISO。格式不符、日期溢位（例如 2 月 30 日）
  * 或來回換算不一致時回傳 null。
  */
 export function taipeiInputToIso(value: string): string | null {
@@ -200,7 +200,7 @@ export function taipeiInputToIso(value: string): string | null {
   return taipeiParts(ms) === text ? `${text}:00+08:00` : null;
 }
 
-/** 台北日期 `YYYY-MM-DD`。 */
+/** 臺北日期 `YYYY-MM-DD`。 */
 export function taipeiDate(value: unknown): string {
   return taipeiParts(value).slice(0, 10);
 }
@@ -221,7 +221,7 @@ export function addDays(date: string, days: number): string {
   return Number.isNaN(ms) ? "" : new Date(ms + days * DAY_MS).toISOString().slice(0, 10);
 }
 
-/** 台北日曆的星期（0 = 星期一 … 6 = 星期日）。 */
+/** 臺北日曆的星期（0 = 星期一 … 6 = 星期日）。 */
 export function weekdayIndex(date: string): number {
   const ms = dateMs(date);
   return Number.isNaN(ms) ? -1 : (new Date(ms).getUTCDay() + 6) % 7;
@@ -237,7 +237,7 @@ export function mondayOf(date: string): string {
   return i < 0 ? "" : addDays(date, -i);
 }
 
-/** 某時間點（預設現在）所在的台北週一。 */
+/** 某時間點（預設現在）所在的臺北週一。 */
 export function currentWeek(now: number = Date.now()): string {
   return mondayOf(taipeiDate(now));
 }
@@ -249,12 +249,12 @@ export function monthDay(date: string): string {
   return date.slice(5, 10);
 }
 
-/** 台北時間 `HH:MM`。 */
+/** 臺北時間 `HH:MM`。 */
 export function hhmm(value: unknown): string {
   return taipeiParts(value).slice(11, 16) || "—";
 }
 
-/** 台北時間 `YYYY-MM-DD HH:MM`；null 顯示「未設定」。 */
+/** 臺北時間 `YYYY-MM-DD HH:MM`；null 顯示「未設定」。 */
 export function taipeiDateTime(value: unknown): string {
   if (value === null || value === undefined || value === "") return "未設定";
   const parts = taipeiParts(value);
