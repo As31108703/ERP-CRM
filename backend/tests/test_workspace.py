@@ -360,7 +360,6 @@ def test_seeder_order_must_be_unique(monkeypatch: pytest.MonkeyPatch) -> None:
         seed.register_seeder("b", lambda ctx, t: None, order=10)
 
 
-@pytest.mark.skip(reason="TODO(Task 5+)：各模組接上 seed 函式後，驗證 B§3.0 的示範資料")
 def test_seed_contents_per_template(api: ApiClient) -> None:
     api.setup("manufacturing", "甲")
     ws = api.snapshot()
