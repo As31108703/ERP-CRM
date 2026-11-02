@@ -19,7 +19,8 @@ def make_engine(settings: Settings) -> Engine:
         port=db.port,
         database=db.name,
     )
-    return create_engine(url, pool_pre_ping=True)
+    # 錯誤訊息（會被記進日誌）不附 SQL 參數值，避免權杖、csrf 或使用者輸入外洩
+    return create_engine(url, pool_pre_ping=True, hide_parameters=True)
 
 
 def get_db(request: Request) -> Iterator[Session]:

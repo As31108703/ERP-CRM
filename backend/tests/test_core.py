@@ -281,3 +281,28 @@ def test_make_engine_and_get_db(test_settings, test_client):
     r = test_client.get("/api/v1/_test/db")
     assert r.status_code == 200
     assert r.json() == {"one": 1}
+
+
+def test_engine_hides_parameters_in_errors(test_settings, db_engine):
+    """資料庫錯誤的訊息（會進日誌）不帶 SQL 參數值，避免 csrf、店名等內容外洩。
+
+    PostgreSQL 自己的 DETAIL 仍會列出衝突的唯一鍵值（這裡是權杖的 sha256），不在此檢查範圍。
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    key = "f" * 64
+    engine = make_engine(test_settings)
+    try:
+        insert = text(
+            "INSERT INTO workspace_session (id, token_hash, csrf) "
+            "VALUES (gen_random_uuid(), :token_hash, :csrf)"
+        )
+        with engine.begin() as conn:
+            conn.execute(insert, {"token_hash": key, "csrf": "c" * 64})
+        with pytest.raises(IntegrityError) as err, engine.begin() as conn:
+            conn.execute(insert, {"token_hash": key, "csrf": "d" * 64})
+    finally:
+        engine.dispose()
+    message = str(err.value)
+    assert "hidden due to hide_parameters" in message
+    assert "d" * 64 not in message
