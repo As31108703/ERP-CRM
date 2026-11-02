@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory, type RouterHistory, type RouteRecordRaw } from "vue-router";
+import { usePreferencesStore } from "./stores/preferences";
 import { useWorkspaceStore } from "./stores/workspace";
 
 export const MODULE_ROUTES = ["crm", "inventory", "sales", "wallets", "services", "manufacturing", "projects"] as const;
@@ -7,13 +8,14 @@ export const MODULE_ROUTES = ["crm", "inventory", "sales", "wallets", "services"
 export const SETUP_ROUTES = ["design", "custom", "capabilities", "blueprint", "build"] as const;
 
 const Placeholder = () => import("./views/PlaceholderView.vue");
+const DesignStudio = () => import("./modules/design/DesignStudio.vue");
 
 const named: { name: string; title: string }[] = [
   { name: "build", title: "快速上手" },
   { name: "custom", title: "自訂建置" },
   { name: "overview", title: "工作總覽" },
   { name: "learning", title: "沉浸教學" },
-  { name: "design", title: "設計模板" },
+  { name: "design", title: "主題圖庫" },
   { name: "capabilities", title: "功能地圖" },
   { name: "blueprint", title: "系統藍圖" },
   { name: "administration", title: "行政工作台" },
@@ -23,7 +25,12 @@ const named: { name: string; title: string }[] = [
 
 export const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/overview" },
-  ...named.map(({ name, title }) => ({ path: `/${name}`, name, component: Placeholder, meta: { title } })),
+  ...named.map(({ name, title }) => ({
+    path: `/${name}`,
+    name,
+    component: name === "design" ? DesignStudio : Placeholder,
+    meta: { title },
+  })),
   {
     path: `/m/:module(${MODULE_ROUTES.join("|")})`,
     name: "module",
@@ -46,6 +53,11 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
       return { path: "/overview" };
     }
     return true;
+  });
+
+  // 離開主題圖庫即取消外觀試看（「到工作台看效果」除外）。
+  router.afterEach((to, from) => {
+    if (from.name === "design" && to.name !== "design") usePreferencesStore().leftDesign();
   });
 
   return router;
