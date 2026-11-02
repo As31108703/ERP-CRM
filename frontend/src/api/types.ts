@@ -36,6 +36,7 @@ export interface Template {
   sample?: unknown;
   terminology?: Record<string, string>;
   module_dependencies?: Record<string, string[]>;
+  default_config?: Record<string, unknown>;
 }
 
 export interface TemplatesResponse {
@@ -43,8 +44,9 @@ export interface TemplatesResponse {
   defaults: {
     industry: string;
     company_name: string;
-    modules?: string[];
+    modules?: string[] | null;
     public_demo: boolean;
+    auto_setup?: boolean;
     retention_hours: number | null;
   };
 }

@@ -9,6 +9,13 @@ export const SETUP_ROUTES = ["design", "custom", "capabilities", "blueprint", "b
 
 const Placeholder = () => import("./views/PlaceholderView.vue");
 const DesignStudio = () => import("./modules/design/DesignStudio.vue");
+const PAGES: Record<string, () => Promise<unknown>> = {
+  design: DesignStudio,
+  build: () => import("./modules/build/BuildWizard.vue"),
+  custom: () => import("./modules/build/CustomSetup.vue"),
+  capabilities: () => import("./modules/capabilities/CapabilityMap.vue"),
+  blueprint: () => import("./modules/blueprint/BlueprintPage.vue"),
+};
 
 const named: { name: string; title: string }[] = [
   { name: "build", title: "快速上手" },
@@ -28,7 +35,7 @@ export const routes: RouteRecordRaw[] = [
   ...named.map(({ name, title }) => ({
     path: `/${name}`,
     name,
-    component: name === "design" ? DesignStudio : Placeholder,
+    component: PAGES[name] ?? Placeholder,
     meta: { title },
   })),
   {
