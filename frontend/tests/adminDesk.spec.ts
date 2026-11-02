@@ -106,15 +106,29 @@ interface Mounted {
   store: ReturnType<typeof useWorkspaceStore>;
 }
 
-async function mountDesk(ws: WorkspaceSnapshot, path = "/administration"): Promise<Mounted> {
+async function mountDesk(
+  ws: WorkspaceSnapshot,
+  path = "/administration",
+  opts: { overviewFails?: { count: number }; holdRowsAfter?: number } = {},
+): Promise<Mounted> {
   const data = (ws.administration ?? null) as Record<string, unknown[]> | null;
+  let rowsCalls = 0;
   const fetchMock = vi.fn(async (input: string) => {
     const url = new URL(input, "http://x");
     if (url.pathname.endsWith("/rows")) {
+      rowsCalls += 1;
+      // 模擬 /rows 回應很慢：之後的請求一直不回來。
+      if (opts.holdRowsAfter !== undefined && rowsCalls > opts.holdRowsAfter) return new Promise<Response>(() => undefined);
       const tab = url.searchParams.get("tab") ?? "";
       return json(200, { rows: data?.[tab] ?? [], summary: `共 ${(data?.[tab] ?? []).length} 筆`, status_scope: "全部", period: "全部日期" });
     }
-    if (url.pathname.endsWith("/overview")) return json(200, OVERVIEW);
+    if (url.pathname.endsWith("/overview")) {
+      if (opts.overviewFails && opts.overviewFails.count > 0) {
+        opts.overviewFails.count -= 1;
+        return json(500, { error: { code: "internal_error", message: "概覽暫時無法讀取" } });
+      }
+      return json(200, OVERVIEW);
+    }
     if (url.pathname.endsWith("/attendance-diff")) return json(200, []);
     if (url.pathname.endsWith("/export.csv")) return new Response(CSV, { status: 200, headers: { "Content-Type": "text/csv" } });
     return json(404, { error: { code: "not_found", message: "找不到資源" } });
@@ -282,6 +296,18 @@ describe("AdminDesk", () => {
     const sheet = wrapper.get("[data-testid=print-sheet]");
     expect(sheet.text()).toContain("SIM 行政紀錄：週班表");
     expect(sheet.findAll("dt")).toHaveLength(12);
+  });
+});
+
+describe("AdminDesk load errors", () => {
+  it("a successful overview reload clears the overview error", async () => {
+    const fails = { count: 1 };
+    const { wrapper } = await mountDesk(enabledWs(), "/administration", { overviewFails: fails, holdRowsAfter: 1 });
+    expect(wrapper.get("[data-testid=admin-load-error]").text()).toContain("概覽暫時無法讀取");
+    // 換週後概覽成功、/rows 尚未回來：橫幅仍應立即消失，不必等列表重抓。
+    await wrapper.findAll("[data-testid=admin-week] button").find((b) => b.text() === "→")!.trigger("click");
+    await flush();
+    expect(wrapper.find("[data-testid=admin-load-error]").exists()).toBe(false);
   });
 });
 

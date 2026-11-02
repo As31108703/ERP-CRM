@@ -109,7 +109,10 @@ const onboardingOpen = ref<boolean | null>(null);
 const overview = ref<AdminOverview | null>(null);
 const listing = ref<AdminRows | null>(null);
 const diff = ref<DiffRow[]>([]);
-const loadError = ref("");
+const rowsError = ref("");
+const overviewError = ref("");
+/** 列表與概覽各自記錄錯誤，任一邊成功只清除自己的錯誤。 */
+const loadError = computed(() => rowsError.value || overviewError.value);
 const diffError = ref("");
 const toolError = ref("");
 const printData = ref<PrintData | null>(null);
@@ -185,10 +188,10 @@ async function loadRows(): Promise<void> {
     const data = await get<AdminRows>(`${ADMIN_API}/rows?${query(rowsParams.value)}`);
     if (seq !== rowsSeq) return;
     listing.value = data;
-    loadError.value = "";
+    rowsError.value = "";
   } catch (err) {
     if (seq !== rowsSeq) return;
-    loadError.value = messageOf(err);
+    rowsError.value = messageOf(err);
   }
 }
 
@@ -198,9 +201,11 @@ async function loadOverview(): Promise<void> {
   const seq = ++overviewSeq;
   try {
     const data = await get<AdminOverview>(`${ADMIN_API}/overview?${query({ week: week.value, unit: unit.value })}`);
-    if (seq === overviewSeq) overview.value = data;
+    if (seq !== overviewSeq) return;
+    overview.value = data;
+    overviewError.value = "";
   } catch (err) {
-    if (seq === overviewSeq) loadError.value = messageOf(err);
+    if (seq === overviewSeq) overviewError.value = messageOf(err);
   }
 }
 
@@ -470,7 +475,7 @@ async function submitForm(cmd: AdminCommand): Promise<void> {
 
 // ── 匯出與列印 ───────────────────────────────────────────
 const exportQuery = computed(() => query(rowsParams.value));
-const canExport = computed(() => rows.value.length > 0 && !loadError.value);
+const canExport = computed(() => rows.value.length > 0 && !rowsError.value);
 
 async function exportCsv(): Promise<void> {
   toolError.value = "";

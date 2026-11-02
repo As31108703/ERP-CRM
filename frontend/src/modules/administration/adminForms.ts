@@ -909,7 +909,15 @@ function noticeFields(unitChoices: () => AdminOption[]): AdminField[] {
   ];
 }
 
-function noticeBody(v: AdminValues): Record<string, unknown> | string {
+interface NoticeBody {
+  title: string;
+  body: string;
+  unit_id: string | null;
+  pinned: boolean;
+  due_at: string | null;
+}
+
+function noticeBody(v: AdminValues): NoticeBody | string {
   const dueText = text(v, "due_at");
   let due_at: string | null = null;
   if (dueText) {
@@ -938,7 +946,7 @@ export function noticeCreateForm(desk: DeskData): AdminFormSpec {
       if (err) return err;
       const body = noticeBody(v);
       if (typeof body === "string") return body;
-      return { method: "POST", path: `${ADMIN_API}/notices`, body, tab: "notices", label: String(body.title) };
+      return { method: "POST", path: `${ADMIN_API}/notices`, body: { ...body }, tab: "notices", label: body.title };
     },
   };
 }
@@ -948,29 +956,39 @@ export function noticeEditForm(desk: DeskData, row: Row): AdminFormSpec {
   const fields = noticeFields(() =>
     unitOptions(desk.units.filter((u) => u.active === true || u.id === row.unit_id)),
   );
+  const initial: AdminValues = {
+    title: String(row.title ?? ""),
+    body: String(row.body ?? ""),
+    unit_id: typeof row.unit_id === "string" ? row.unit_id : "",
+    pinned: row.pinned === true,
+    due_at: isoToTaipeiInput(row.due_at),
+  };
   return {
     title: "編輯公告",
     code: "NOTICE-EDIT",
     submitLabel: "儲存公告",
     fields,
-    initial: {
-      title: String(row.title ?? ""),
-      body: String(row.body ?? ""),
-      unit_id: typeof row.unit_id === "string" ? row.unit_id : "",
-      pinned: row.pinned === true,
-      due_at: isoToTaipeiInput(row.due_at),
-    },
+    initial,
     build: (v) => {
       const err = precheck(fields, v);
       if (err) return err;
-      const body = noticeBody(v);
-      if (typeof body === "string") return body;
+      const full = noticeBody(v);
+      if (typeof full === "string") return full;
+      // 只送出有變更的欄位：帶 unit_id 會觸發「組織必須使用中」檢查，
+      // 所屬組織已停用的公告只改標題時不能帶；未變更的截止時間也不重送（避免被截成分鐘）。
+      const body: Record<string, unknown> = {};
+      if (full.title !== String(row.title ?? "")) body.title = full.title;
+      if (full.body !== String(row.body ?? "")) body.body = full.body;
+      if (text(v, "unit_id") !== initial.unit_id) body.unit_id = full.unit_id;
+      if (full.pinned !== (row.pinned === true)) body.pinned = full.pinned;
+      if (text(v, "due_at") !== initial.due_at) body.due_at = full.due_at;
+      if (Object.keys(body).length === 0) return "沒有變更任何欄位，請修改後再儲存。";
       return {
         method: "PATCH",
         path: `${ADMIN_API}/notices/${enc(row.id)}`,
         body,
         tab: "notices",
-        label: String(body.title),
+        label: full.title,
         focusId: row.id,
       };
     },

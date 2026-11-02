@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   correctionForm,
+  noticeEditForm,
   requestCreateForm,
   shiftCreateForm,
   type AdminCommand,
@@ -127,5 +128,33 @@ describe("adminForms", () => {
     // 請購金額必須大於 0。
     const purchase = spec.build({ ...values, type: "purchase", amount_sim: "0", start_at: "", end_at: "" });
     expect(purchase).toContain("金額");
+  });
+
+  it("notice edit sends only changed fields (inactive unit, title only)", () => {
+    const d = desk();
+    d.units.push({ id: "u-off", name: "舊部門", kind: "department", parent_id: null, active: false, ...STAMP });
+    const row = {
+      id: "n1",
+      title: "舊標題",
+      body: "內容",
+      unit_id: "u-off",
+      pinned: true,
+      due_at: "2026-11-06T08:00:30+00:00",
+      archived: false,
+      ...STAMP,
+    };
+    const spec = noticeEditForm(d, row);
+    const out = spec.build({ ...spec.initial, title: "新標題" });
+    expect(isCommand(out)).toBe(true);
+    if (!isCommand(out)) return;
+    expect(out.method).toBe("PATCH");
+    expect(out.path).toBe("/api/v1/administration/notices/n1");
+    // 不帶 unit_id（避免停用組織檢查），也不重送被截到分鐘的 due_at。
+    expect(out.body).toEqual({ title: "新標題" });
+
+    expect(spec.build({ ...spec.initial })).toBe("沒有變更任何欄位，請修改後再儲存。");
+
+    const cleared = spec.build({ ...spec.initial, unit_id: "", pinned: false, due_at: "" });
+    expect(isCommand(cleared) && cleared.body).toEqual({ unit_id: null, pinned: false, due_at: null });
   });
 });
