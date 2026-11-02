@@ -11,6 +11,7 @@ from src.core.ids import new_id, token_hex
 from src.core.problem import ensure
 from src.modules.catalog.seed import seed_workspace
 from src.modules.catalog.templates import get_template, resolve_modules
+from src.modules.reports.service import build_report
 from src.modules.workspace.retention import RETENTION_HOURS
 from src.platform import registry
 from src.platform.context import CommandContext, HistoryRow, WorkspaceRow
@@ -112,8 +113,10 @@ def view(ctx: CommandContext) -> dict[str, Any]:
     row = ctx.session_row
     public_demo = ctx.settings.app.public_demo
     workspace = None
+    report = None
     if ctx.workspace is not None:
         workspace = snapshot(ctx.db, ctx.workspace, row.version)
+        report = build_report(ctx.db, ctx.workspace_id)
     expires_at = None
     if public_demo:
         expires_at = clock.iso(row.last_seen_at + timedelta(hours=RETENTION_HOURS))
@@ -123,8 +126,8 @@ def view(ctx: CommandContext) -> dict[str, Any]:
         "version": row.version,
         "retention_hours": RETENTION_HOURS if public_demo else None,
         "expires_at": expires_at,
-        # Task 15 之前一律為 null
-        "report": None,
+        # 與 GET /api/v1/reports 同一份計算；沒有工作區時為 null
+        "report": report,
     }
 
 

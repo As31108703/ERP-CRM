@@ -14,6 +14,7 @@ from src.modules.crm.router import router as crm_router
 from src.modules.inventory.router import router as inventory_router
 from src.modules.manufacturing.router import router as manufacturing_router
 from src.modules.projects.router import router as projects_router
+from src.modules.reports.router import router as reports_router
 from src.modules.sales.router import router as sales_router
 from src.modules.services.router import router as services_router
 from src.modules.wallets.router import router as wallets_router
@@ -52,6 +53,7 @@ ROUTERS: list[APIRouter] = [
     manufacturing_router,
     projects_router,
     administration_router,
+    reports_router,
 ]
 
 
