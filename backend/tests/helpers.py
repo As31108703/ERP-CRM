@@ -5,6 +5,11 @@ from typing import Any
 
 import httpx
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from src.config.settings import Settings
+from src.core import clock
+from src.platform.context import CommandContext, WorkspaceRow, WorkspaceSessionRow
 
 # conftest 只在測試時註冊的路由：回傳目前 session 的 csrf 與版本號
 TEST_STATE_PATH = "/api/v1/_test/csrf"
@@ -89,3 +94,13 @@ class ApiClient:
         if modules is not None:
             body["modules"] = modules
         return self.ok("POST", "/api/v1/workspace/setup", body)
+
+
+def workspace_ctx(db: Session, settings: Settings) -> CommandContext:
+    """直接呼叫 service 的單元測試用：以資料庫中唯一的工作區組出 CommandContext。"""
+    workspace = db.exec(select(WorkspaceRow)).one()
+    session_row = db.get(WorkspaceSessionRow, workspace.session_id)
+    assert session_row is not None
+    return CommandContext(
+        db=db, session_row=session_row, workspace=workspace, now=clock.utcnow(), settings=settings
+    )

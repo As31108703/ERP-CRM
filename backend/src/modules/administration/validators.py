@@ -8,6 +8,7 @@ from typing import Any
 
 from src.core import clock
 from src.core.problem import Problem, ensure
+from src.platform.records import FINANCE_KEY_RE, PROTECTED_KEYS
 
 INT_MAX = 1_000_000_000
 DEFAULT_MAX_MINUTES = 48 * 60
@@ -20,32 +21,21 @@ _UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I | re.ASCII
 )
 
-# B§3.1 通用前置檢查（金融鍵名與保護欄位）。
-# TODO(merge)：Task 5 的 platform/records.precheck 合併進來後改用共用版本。
-_FINANCE_RE = re.compile(r"(bank|payer|finance|legal|payment_url)", re.I)
-_PROTECTED_KEYS = {
-    "currency",
-    "simulation",
-    "real_finance",
-    "balance_minor",
-    "on_hand",
-    "reserved",
-    "lots",
-    "stock_value_minor",
-}
+# B§3.1 通用前置檢查：金融鍵名與保護欄位沿用 platform.records 的共用定義。
+# 行政命令不套用 records.precheck 的整數正規化與產品／教學檢查（行政欄位型別較嚴格）。
 
 
 def precheck(payload: dict[str, Any]) -> None:
     """行政命令執行前的通用檢查：金融鍵名回 simulation_required，保護欄位回 protected_field。"""
     for key in payload:
         ensure(
-            not _FINANCE_RE.search(key),
+            not FINANCE_KEY_RE.search(key),
             422,
             "simulation_required",
             "此模擬工作台不處理真實金融資料",
         )
     for key in payload:
-        ensure(key not in _PROTECTED_KEYS, 422, "protected_field", "這個欄位由系統維護，不能指定")
+        ensure(key not in PROTECTED_KEYS, 422, "protected_field", "這個欄位由系統維護，不能指定")
 
 
 def strict_keys(payload: Any, required: set[str], optional: set[str]) -> None:

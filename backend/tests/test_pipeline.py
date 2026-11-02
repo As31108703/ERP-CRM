@@ -11,7 +11,8 @@ from sqlalchemy import Engine, text
 
 from src.core import clock
 from src.core.problem import Problem
-from src.platform import registry
+from src.platform import pipeline, ratelimit, registry
+from src.platform.context import WorkspaceSessionRow
 from tests.helpers import ApiClient, new_key
 
 ECHO = "/api/v1/_test/echo"
@@ -27,7 +28,7 @@ def _scalar(db_engine: Engine, sql: str, **params) -> object:
 
 
 def _seed_workspace(db_engine: Engine, modules: list[str] | None = None) -> None:
-    """直接在資料庫替唯一的 session 建立工作區（Task 4 之前沒有 setup 路由）。"""
+    """直接在資料庫替唯一的 session 建立最小的工作區（不經 setup，因此沒有示範資料）。"""
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -36,6 +37,14 @@ def _seed_workspace(db_engine: Engine, modules: list[str] | None = None) -> None
                 " '測試公司', :modules, 1 FROM workspace_session"
             ),
             {"modules": modules if modules is not None else ["inventory"]},
+        )
+        # 合法的工作區一定有三個系統錢包（wallets 模組的一致性檢查）
+        conn.execute(
+            text(
+                "INSERT INTO wallet (id, workspace_id, kind, name) "
+                "SELECT gen_random_uuid(), w.id, k, k FROM workspace w, "
+                "unnest(ARRAY['business', 'supplier', 'faucet']) AS k"
+            )
         )
 
 
@@ -298,7 +307,10 @@ def test_stale_version_412(api, db_engine):
 # --- 速率限制 -----------------------------------------------------------------
 
 
-def test_rate_limit_120_per_minute(api):
+def test_rate_limit_120_per_minute(api, monkeypatch):
+    # 固定時鐘：120 個請求都落在同一個視窗，retry_after_ms 必為 start + 60001 - now = 60001
+    t0 = clock.utcnow()
+    monkeypatch.setattr(clock, "utcnow", lambda: t0)
     # GET 也計入：1 次 state + 59 次 GET + 60 次寫入 = 120
     state = api.state()
     for _ in range(59):
@@ -308,10 +320,47 @@ def test_rate_limit_120_per_minute(api):
         assert r.status_code == 200, (i, r.text)
     r = api.mutate("POST", ECHO, {}, csrf=state["csrf"], version=state["version"] + 60)
     assert _error(r) == (429, "rate_limit")
-    retry = r.json()["error"]["retry_after_ms"]
-    assert 1 <= retry <= 60_001
-    assert int(r.headers["retry-after"]) >= 1
+    assert r.json()["error"]["retry_after_ms"] == 60_001
+    assert r.headers["retry-after"] == "61"
     assert _error(api.client.get("/api/v1/_test/csrf")) == (429, "rate_limit")
+
+
+def test_rate_limit_retry_never_exceeds_window():
+    """視窗起點晚於 now（並行請求先取得鎖並開了新視窗）時，retry_after_ms 仍不超過 60001。"""
+    now = clock.utcnow()
+    row = WorkspaceSessionRow(
+        token_hash="x", csrf="x", rate_start=now + timedelta(milliseconds=1480), rate_count=120
+    )
+    with pytest.raises(Problem) as e:
+        ratelimit.hit(row, now)
+    assert (e.value.code, e.value.retry_after_ms) == ("rate_limit", 60_001)
+
+
+def test_touch_session_reads_clock_after_lock(api, monkeypatch, db_engine):
+    """GET 的速率計數與最後存取時間用取得 session 列鎖之後的時間，不是排隊前讀到的時間。"""
+    api.state()
+    ticks = iter(range(1, 1000))
+    t0 = clock.utcnow()
+    lock_tick: list[int] = []
+    current = [0]
+
+    def fake_now():
+        current[0] = next(ticks)
+        return t0 + timedelta(seconds=current[0])
+
+    real_lock = pipeline.lock_session
+
+    def tracking_lock(db, token, now):
+        row = real_lock(db, token, now)
+        lock_tick.append(current[0])
+        return row
+
+    monkeypatch.setattr(clock, "utcnow", fake_now)
+    monkeypatch.setattr(pipeline, "lock_session", tracking_lock)
+    assert api.client.get("/api/v1/_test/csrf").status_code == 200
+    with db_engine.connect() as conn:
+        seen = conn.execute(text("SELECT last_seen_at FROM workspace_session")).scalar_one()
+    assert seen > t0 + timedelta(seconds=lock_tick[-1])
 
 
 def test_rate_limit_counts_failed_writes_and_resets(api, monkeypatch):
@@ -486,3 +535,32 @@ def test_registry_constants_and_register(monkeypatch):
     registry.register(b)
     registry.register(a)  # 重複註冊同名模組會取代，不會重複
     assert [s.name for s in registry.all_specs()] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["sales", "crm", "inventory", "wallets", "zeta"],
+        ["zeta", "administration", "projects", "manufacturing", "services", "wallets"],
+        ["crm", "wallets", "alpha", "sales", "zeta", "inventory"],
+    ],
+)
+def test_all_specs_order_independent_of_import(monkeypatch, names):
+    """不論模組匯入（登錄）先後，快照、一致性檢查與還原都依固定的模組順序；
+    不在固定清單中的模組排在最後，彼此維持登錄順序。"""
+    monkeypatch.setattr(registry, "_SPECS", {})
+    for name in names:
+        registry.register(registry.ModuleSpec(name, lambda _d, _w: {}, lambda _d, _w, _x: None))
+    fixed = [n for n in registry.SPEC_ORDER if n in names]
+    others = [n for n in names if n not in registry.SPEC_ORDER]
+    assert [s.name for s in registry.all_specs()] == fixed + others
+    assert registry.SPEC_ORDER == (
+        "inventory",
+        "wallets",
+        "sales",
+        "crm",
+        "services",
+        "manufacturing",
+        "projects",
+        "administration",
+    )

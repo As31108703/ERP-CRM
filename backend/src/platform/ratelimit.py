@@ -7,8 +7,9 @@ from src.platform.context import WorkspaceSessionRow
 
 WINDOW = timedelta(milliseconds=60_000)
 LIMIT = 120
-# retry_after_ms = max(1, start + 60001ms - now)
+# retry_after_ms = start + 60001ms - now，限制在 1..60001
 _RETRY_BASE = timedelta(milliseconds=60_001)
+_RETRY_MAX = 60_001
 
 
 def _ms(delta: timedelta) -> int:
@@ -24,7 +25,8 @@ def hit(session_row: WorkspaceSessionRow, now: datetime) -> None:
         session_row.rate_start = now
         session_row.rate_count = 0
     if session_row.rate_count >= LIMIT:
-        retry = max(1, _ms(session_row.rate_start + _RETRY_BASE - now))
+        # 視窗起點理論上不晚於 now；萬一晚於（時鐘回撥等），也不回超過一個視窗的等待時間
+        retry = min(_RETRY_MAX, max(1, _ms(session_row.rate_start + _RETRY_BASE - now)))
         raise Problem(429, "rate_limit", "操作較密集，請稍候接續原工作", retry)
     session_row.rate_count += 1
     session_row.last_seen_at = now

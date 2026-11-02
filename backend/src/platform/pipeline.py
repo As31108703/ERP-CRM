@@ -121,6 +121,7 @@ def touch_session(request: Request) -> Iterator[CommandContext]:
     with Session(request.app.state.engine, expire_on_commit=False) as db:
         try:
             row = lock_session(db, session_token(request), clock.utcnow())
+            # 速率與存取時間以取得鎖之後為準，且同一 session 單調不減
             now = session_now(row)
             ratelimit.hit(row, now)
             db.commit()

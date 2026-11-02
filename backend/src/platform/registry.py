@@ -34,7 +34,21 @@ class ModuleSpec:
     invariants: tuple[Callable[[Session, str], None], ...] = ()
 
 
-# 依註冊順序保存；同名模組重複註冊時取代原本的設定（模組被重新匯入也不會重複）
+# 快照、一致性檢查與還原的固定執行順序，與模組匯入或登錄的先後無關：
+# 被參照的模組在前（錢包、商品先於訂單，案件先於服務）；inventory 在 wallets 之前，
+# 讓採購金額（purchase_invalid）先於流水語意（ledger_invalid）檢查，與參考系統的錯誤優先序一致
+SPEC_ORDER = (
+    "inventory",
+    "wallets",
+    "sales",
+    "crm",
+    "services",
+    "manufacturing",
+    "projects",
+    "administration",
+)
+
+# 同名模組重複註冊時取代原本的設定（模組被重新匯入也不會重複）
 _SPECS: dict[str, ModuleSpec] = {}
 
 
@@ -43,4 +57,7 @@ def register(spec: ModuleSpec) -> None:
 
 
 def all_specs() -> list[ModuleSpec]:
-    return list(_SPECS.values())
+    """依 SPEC_ORDER 排序；不在清單中的模組排在最後，彼此維持登錄順序。"""
+    rank = {name: i for i, name in enumerate(SPEC_ORDER)}
+    specs = list(_SPECS.values())
+    return sorted(specs, key=lambda s: rank.get(s.name, len(SPEC_ORDER)))
