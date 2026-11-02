@@ -217,4 +217,57 @@ describe("api client", () => {
     expect(err.status).toBe(404);
     expect(err.code).toBe("not_found");
   });
+  it("upload uses the same write headers, reports progress and keeps pending on 5xx", async () => {
+    const { client, pending } = await load();
+    const sent: Array<Record<string, unknown>> = [];
+    class Xhr {
+      headers: Record<string, string> = {};
+      upload: { onprogress: ((e: unknown) => void) | null; onload: (() => void) | null } = { onprogress: null, onload: null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      status = 0;
+      responseText = "";
+      withCredentials = false;
+      method = "";
+      url = "";
+      open(m: string, u: string) {
+        this.method = m;
+        this.url = u;
+      }
+      setRequestHeader(n: string, v: string) {
+        this.headers[n] = v;
+      }
+      getResponseHeader(n: string) {
+        return n === "Retry-After" ? "3" : null;
+      }
+      send(body: string) {
+        sent.push({ xhr: this, body });
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", Xhr);
+    const progress: number[][] = [];
+    let uploaded = false;
+    const p = client.upload("POST", "/api/v1/backup/import", { format: "erpcrm-sim-backup" }, {
+      onProgress: (l, t) => progress.push([l, t]),
+      onUploaded: () => (uploaded = true),
+    });
+    expect(client.inflight.value).toBe(1);
+    const xhr = sent[0].xhr as Xhr;
+    expect(xhr.headers["x-csrf-token"]).toBe("csrf-token-1");
+    expect(xhr.headers["If-Match-Version"]).toBe("7");
+    expect(pending.readPending()?.key).toBe(xhr.headers["Idempotency-Key"]);
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+    xhr.upload.onload?.();
+    xhr.status = 503;
+    xhr.responseText = JSON.stringify({ error: { code: "unavailable", message: "暫停服務" } });
+    xhr.onload?.();
+    const err = await failure(p);
+    expect(err.status).toBe(503);
+    expect(err.retryAfterMs).toBe(3000);
+    expect(progress).toEqual([[5, 10]]);
+    expect(uploaded).toBe(true);
+    expect(pending.readPending()).not.toBeNull();
+    expect(client.inflight.value).toBe(0);
+  });
 });

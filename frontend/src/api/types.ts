@@ -24,7 +24,8 @@ export interface WorkspaceView {
   version: number;
   retention_hours?: number | null;
   expires_at?: string | null;
-  report?: Record<string, number> | null;
+  /** 後端 report(w)：`*_minor` 金額、`gross_profit_basis` 與選用的 `administration` 計數。 */
+  report?: Record<string, unknown> | null;
 }
 
 export interface Template {

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { ApiError, get, mutate, retryPending, setSession } from "../api/client";
+import { ApiError, get, mutate, retryPending, setSession, upload as uploadRequest, type UploadHandlers } from "../api/client";
 import { readPending, type MutateMethod, type PendingOperation } from "../api/pending";
 import type { MutationResult, TemplatesResponse, Workbench, WorkspaceView } from "../api/types";
 
@@ -104,19 +104,18 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return null;
   }
 
-  async function run<T = MutationResult>(method: MutateMethod, path: string, body: unknown): Promise<T | null> {
-    const blocked = blockedReason();
-    if (blocked) {
-      error.value = blocked;
-      return null;
-    }
+  /**
+   * 寫入的共用流程：標記處理中、成功後顯示訊息並重新讀取；失敗時顯示錯誤、
+   * 重讀 pending，遇到 409／412 也重新讀取以取得最新版本號。
+   */
+  async function execute<T>(call: () => Promise<T>, success: string): Promise<T | null> {
     busy.value = true;
     error.value = "";
     message.value = "";
     try {
-      const result = await mutate<T>(method, path, body);
+      const result = await call();
       pending.value = readPending();
-      message.value = SAVED_MESSAGE;
+      message.value = success;
       await refresh();
       return result;
     } catch (err) {
@@ -132,29 +131,34 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     }
   }
 
+  async function run<T = MutationResult>(method: MutateMethod, path: string, body: unknown): Promise<T | null> {
+    const blocked = blockedReason();
+    if (blocked) {
+      error.value = blocked;
+      return null;
+    }
+    return execute(() => mutate<T>(method, path, body), SAVED_MESSAGE);
+  }
+
+  /** 大型寫入（備份匯入）：與 run 相同的鎖定與重新讀取規則，另外回報上傳進度。 */
+  async function upload<T = MutationResult>(
+    path: string,
+    body: unknown,
+    handlers: UploadHandlers = {},
+    success = SAVED_MESSAGE,
+  ): Promise<T | null> {
+    const blocked = blockedReason();
+    if (blocked) {
+      error.value = blocked;
+      return null;
+    }
+    return execute(() => uploadRequest<T>("POST", path, body, handlers), success);
+  }
+
   /** 以同一把 key 重送上次未確認的操作。 */
   async function retry<T = MutationResult>(): Promise<T | null> {
     if (busy.value) return null;
-    busy.value = true;
-    error.value = "";
-    message.value = "";
-    try {
-      const result = await retryPending<T>();
-      pending.value = readPending();
-      message.value = RECOVERED_MESSAGE;
-      await refresh();
-      return result;
-    } catch (err) {
-      error.value = messageOf(err);
-      pending.value = readPending();
-      if (err instanceof ApiError && (err.status === 409 || err.status === 412)) {
-        await refresh();
-        error.value = messageOf(err);
-      }
-      return null;
-    } finally {
-      busy.value = false;
-    }
+    return execute(() => retryPending<T>(), RECOVERED_MESSAGE);
   }
 
   function dismissMessage(): void {
@@ -175,7 +179,9 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     refresh,
     ready,
     run,
+    upload,
     retry,
+    blockedReason,
     setDesignPreview,
     dismissMessage,
   };

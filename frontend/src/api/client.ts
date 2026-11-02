@@ -46,12 +46,13 @@ function newKey(): string {
   return crypto.randomUUID();
 }
 
-async function decodeError(res: Response): Promise<ApiError> {
-  let code = `http_${res.status}`;
-  let message = `請求失敗（HTTP ${res.status}）`;
+/** 由狀態碼、回應文字與 Retry-After 標頭組出 ApiError（fetch 與 XHR 共用）。 */
+function errorFrom(status: number, text: string, retryAfter: string | null): ApiError {
+  let code = `http_${status}`;
+  let message = `請求失敗（HTTP ${status}）`;
   let retryAfterMs: number | null = null;
   try {
-    const data = (await res.json()) as Partial<ErrorBody> & { message?: string; code?: string };
+    const data = JSON.parse(text) as Partial<ErrorBody> & { message?: string; code?: string };
     if (data?.error) {
       code = data.error.code || code;
       message = data.error.message || message;
@@ -64,11 +65,20 @@ async function decodeError(res: Response): Promise<ApiError> {
     // 非 JSON 回應（例如 nginx 的 502 頁面），使用預設訊息
   }
   if (retryAfterMs === null) {
-    const header = res.headers.get("Retry-After");
-    const seconds = header === null ? NaN : Number(header);
+    const seconds = retryAfter === null ? NaN : Number(retryAfter);
     if (Number.isFinite(seconds) && seconds >= 0) retryAfterMs = seconds * 1000;
   }
-  return new ApiError(res.status, code, message, retryAfterMs);
+  return new ApiError(status, code, message, retryAfterMs);
+}
+
+async function decodeError(res: Response): Promise<ApiError> {
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    // 讀不到內容時沿用預設訊息
+  }
+  return errorFrom(res.status, text, res.headers.get("Retry-After"));
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
@@ -96,19 +106,21 @@ export function get<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET", headers: { Accept: "application/json" } });
 }
 
-async function send<T>(op: PendingOperation): Promise<T> {
+/** 寫入請求的共用標頭（csrf、冪等鍵、版本號）。fetch 與 XHR 上傳都由此產生。 */
+function writeHeaders(op: PendingOperation): Record<string, string> {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "x-csrf-token": session.csrf,
+    "Idempotency-Key": op.key,
+    "If-Match-Version": String(op.version),
+  };
+}
+
+/** 寫入結果確定後依 F§9 規則清除或保留 pending；成功時清除。 */
+async function settle<T>(call: Promise<T>): Promise<T> {
   try {
-    const data = await request<T>(op.path, {
-      method: op.method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "x-csrf-token": session.csrf,
-        "Idempotency-Key": op.key,
-        "If-Match-Version": String(op.version),
-      },
-      body: JSON.stringify(op.body ?? {}),
-    });
+    const data = await call;
     clearPending();
     return data;
   } catch (err) {
@@ -119,11 +131,70 @@ async function send<T>(op: PendingOperation): Promise<T> {
   }
 }
 
+function send<T>(op: PendingOperation): Promise<T> {
+  return settle(
+    request<T>(op.path, { method: op.method, headers: writeHeaders(op), body: JSON.stringify(op.body ?? {}) }),
+  );
+}
+
 /** 寫入請求：送出前先把操作存成 pending，結果確定後依 F§9 規則清除或保留。 */
 export function mutate<T>(method: MutateMethod, path: string, body: unknown): Promise<T> {
+  return send<T>(prepare(method, path, body));
+}
+
+function prepare(method: MutateMethod, path: string, body: unknown): PendingOperation {
   const op: PendingOperation = { key: newKey(), method, path, body, version: session.version };
+  // 超過 pending 上限（32 KiB，例如備份匯入）時不保存，結果仍依同一套規則處理
   savePending(op);
-  return send<T>(op);
+  return op;
+}
+
+export interface UploadHandlers {
+  /** 上傳進度（位元組）；瀏覽器無法計算總量時 total 為 0。 */
+  onProgress?: (loaded: number, total: number) => void;
+  /** 內容已全部送出，接下來等待伺服器驗證。 */
+  onUploaded?: () => void;
+}
+
+/**
+ * 大型寫入（備份匯入）：以 XHR 送出以取得上傳進度。標頭、pending 與錯誤解碼
+ * 與 `mutate` 相同；回應 2xx 才算成功。
+ */
+export function upload<T>(method: MutateMethod, path: string, body: unknown, handlers: UploadHandlers = {}): Promise<T> {
+  const op = prepare(method, path, body);
+  const payload = JSON.stringify(op.body ?? {});
+  inflight.value++;
+  const call = new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(op.method, op.path);
+    xhr.withCredentials = true;
+    for (const [name, value] of Object.entries(writeHeaders(op))) xhr.setRequestHeader(name, value);
+    xhr.upload.onprogress = (e: ProgressEvent) => {
+      handlers.onProgress?.(e.loaded, e.lengthComputable ? e.total : 0);
+    };
+    xhr.upload.onload = () => handlers.onUploaded?.();
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(errorFrom(xhr.status, xhr.responseText, xhr.getResponseHeader("Retry-After")));
+        return;
+      }
+      if (xhr.status === 204 || xhr.responseText === "") {
+        resolve(undefined as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T);
+      } catch {
+        reject(new ApiError(xhr.status, "invalid_response", "伺服器回應格式不正確。"));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network_error", "無法連線到伺服器，請確認網路後再試。"));
+    xhr.onabort = xhr.onerror;
+    xhr.send(payload);
+  });
+  return settle(call).finally(() => {
+    inflight.value--;
+  });
 }
 
 /** 以同一把 Idempotency-Key、同一份內容與版本號重送上次未確認的操作；沒有時回傳 null。 */

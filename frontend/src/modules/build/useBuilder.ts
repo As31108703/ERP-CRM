@@ -18,6 +18,18 @@ export const INDUSTRY_HINTS: Record<string, { examples: string; glyph: string }>
   general: { examples: "想看全部模組的企業", glyph: "✧" },
 };
 
+/** 保留期限說明：公開試用顯示清除時間或時數，自架模式提醒定期匯出備份（建置頁與設定頁共用）。 */
+export function retentionSummary(store: ReturnType<typeof useWorkspaceStore>): string {
+  const expires = store.view?.expires_at;
+  if (expires) {
+    const at = new Date(expires).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
+    return `公開試用資料預計於 ${at} 清除；持續使用會自動延後。`;
+  }
+  const hours = store.templates?.defaults.retention_hours;
+  if (hours) return `公開試用模式：工作區 ${hours} 小時沒有存取就會整筆清除。`;
+  return "自架模式：資料永久保留在這台伺服器上，請定期匯出備份。";
+}
+
 /**
  * 建置精靈與自訂建置共用：範本、模組勾選（自動補相依／連帶關閉）、檢查與建立工作區。
  * `config` 由呼叫端提供，精靈會把它同步到 sessionStorage 草稿。
@@ -72,16 +84,7 @@ export function useBuilder(config: Ref<BuildConfig>) {
     }
   }
 
-  const retentionText = computed(() => {
-    const expires = store.view?.expires_at;
-    if (expires) {
-      const at = new Date(expires).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
-      return `公開試用資料預計於 ${at} 清除；持續使用會自動延後。`;
-    }
-    const hours = store.templates?.defaults.retention_hours;
-    if (hours) return `公開試用模式：工作區 ${hours} 小時沒有存取就會整筆清除。`;
-    return "自架模式：資料永久保留在這台伺服器上，請定期匯出備份。";
-  });
+  const retentionText = computed(() => retentionSummary(store));
 
   /** 送出 setup；成功後前往工作總覽。重複點擊、鎖定或已有工作區時不送出。 */
   async function create(): Promise<boolean> {

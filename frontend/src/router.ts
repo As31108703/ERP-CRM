@@ -15,6 +15,8 @@ const PAGES: Record<string, () => Promise<unknown>> = {
   custom: () => import("./modules/build/CustomSetup.vue"),
   capabilities: () => import("./modules/capabilities/CapabilityMap.vue"),
   blueprint: () => import("./modules/blueprint/BlueprintPage.vue"),
+  reports: () => import("./modules/reports/ReportsPage.vue"),
+  settings: () => import("./modules/settings/SettingsPage.vue"),
 };
 
 const named: { name: string; title: string }[] = [
