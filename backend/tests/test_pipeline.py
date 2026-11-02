@@ -644,18 +644,35 @@ def test_final_order_constant():
 # --- GET 讀取的一致性 -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/api/v1/workspace/view", "/api/v1/backup/export"])
+_READ_PATHS = ["/api/v1/workspace/view", "/api/v1/backup/export"]
+
+
+def _concurrent_rename(db_engine) -> None:
+    """模擬並行命令提交：改名並把 session 版本號加 1。"""
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE workspace SET company_name = '途中改名'"))
+        conn.execute(text("UPDATE workspace_session SET version = version + 1"))
+
+
+def _read_name_version(body: dict, path: str) -> tuple[str, int, int]:
+    """回應中的店名、外層版本號（view 的 body.version；export 沒有外層，取 meta）與快照版本號。"""
+    if path.endswith("/view"):
+        return body["workspace"]["company_name"], body["version"], body["workspace"]["version"]
+    meta = body["workspace"]
+    return meta["company_name"], meta["version"], meta["version"]
+
+
+@pytest.mark.parametrize("path", _READ_PATHS)
 def test_get_reads_one_snapshot(api, db_engine, monkeypatch, path):
-    """GET 讀取途中有其他交易提交，同一次讀取的後續查詢仍看到讀取開始時的資料。"""
+    """GET 讀取途中有其他交易提交（含版本號），同一次讀取的版本號與資料都停在讀取開始時。"""
     api.setup("general")
+    version = api.state()["version"]
 
     def first(db, workspace_id: str) -> dict:
         name = db.execute(
             text("SELECT company_name FROM workspace WHERE id = :id"), {"id": workspace_id}
         ).scalar_one()
-        # 模擬並行命令在讀取途中提交
-        with db_engine.begin() as conn:
-            conn.execute(text("UPDATE workspace SET company_name = '途中改名'"))
+        _concurrent_rename(db_engine)
         return {"first": name}
 
     def second(db, workspace_id: str) -> dict:
@@ -670,5 +687,28 @@ def test_get_reads_one_snapshot(api, db_engine, monkeypatch, path):
     r = api.get(path)
     assert r.status_code == 200, r.text
     body = r.json()
-    world = body["workspace"] if "first" in body.get("workspace", {}) else body["collections"]
+    world = body["workspace"] if path.endswith("/view") else body["collections"]
     assert world["first"] == world["second"] == "測試公司"
+    assert _read_name_version(body, path) == ("測試公司", version, version)
+
+
+@pytest.mark.parametrize("path", _READ_PATHS)
+def test_get_version_matches_data_after_touch_commit(api, db_engine, monkeypatch, path):
+    """速率計數提交之後、一致讀取交易開始之前有命令提交：回應的版本號與資料必須一致
+    （session 列在讀取交易內重新讀取），不會出現新資料配舊版本號。"""
+    api.setup("general")
+    version = api.state()["version"]
+    original = pipeline.begin_consistent_read
+    fired: list[bool] = []
+
+    def racing(db, row) -> None:
+        if not fired:
+            fired.append(True)
+            _concurrent_rename(db_engine)
+        original(db, row)
+
+    monkeypatch.setattr(pipeline, "begin_consistent_read", racing)
+    r = api.get(path)
+    assert r.status_code == 200, r.text
+    assert fired
+    assert _read_name_version(r.json(), path) == ("途中改名", version + 1, version + 1)

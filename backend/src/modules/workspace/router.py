@@ -45,7 +45,8 @@ def _auto_setup(request: Request, ctx: CommandContext) -> None:
     except BaseException:
         ctx.db.rollback()
         raise
-    begin_consistent_read(ctx.db)
+    begin_consistent_read(ctx.db, ctx.session_row)
+    ctx.workspace = load_workspace(ctx.db, ctx.session_row.id)
 
 
 @router.get("/view")
