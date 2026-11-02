@@ -13,6 +13,7 @@ from src.modules.backup.router import router as backup_router
 from src.modules.catalog.router import router as catalog_router
 from src.modules.crm.router import router as crm_router
 from src.modules.inventory.router import router as inventory_router
+from src.modules.learning.router import router as learning_router
 from src.modules.manufacturing.router import router as manufacturing_router
 from src.modules.projects.router import router as projects_router
 from src.modules.reports.router import router as reports_router
@@ -58,6 +59,7 @@ ROUTERS: list[APIRouter] = [
     reports_router,
     workbench_router,
     backup_router,
+    learning_router,
 ]
 
 

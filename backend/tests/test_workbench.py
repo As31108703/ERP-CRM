@@ -326,7 +326,9 @@ def test_first_run_progress(api: ApiClient) -> None:
             "description": "查看示範商品，編輯名稱與模擬售價；要接單時，再準備庫存與測試幣。",
             "action": "查看我的商品",
         },
+        "learning_available": len(api.get("/api/v1/learning").json()["available_paths"]),
     }
+    assert data["learning_available"] > 0
     product = api.snapshot()["products"][0]["id"]
     api.ok("PATCH", f"{PRODUCTS}/{product}", {"name": "我的商品"})
     assert [p["done"] for p in _first_run(api)["progress"]] == [True, True, False]

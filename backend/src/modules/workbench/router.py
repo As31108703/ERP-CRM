@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 
 from src.core.problem import ensure
+from src.modules.learning.service import available_paths
 from src.modules.workbench import index, queue, readiness, roles
 from src.modules.workbench.first_run import first_run
 from src.modules.workspace import service as workspace_service
@@ -51,4 +52,7 @@ def search(
 
 @router.get("/first-run")
 def first_run_guide(ctx: CommandContext = Touch) -> dict[str, Any]:
-    return first_run(_world(ctx))
+    data = first_run(_world(ctx))
+    ws = ctx.workspace  # _world 已確認工作區存在
+    data["learning_available"] = len(available_paths(ctx.db, str(ws.id))) if ws else 0
+    return data
