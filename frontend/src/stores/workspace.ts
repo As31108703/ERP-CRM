@@ -96,6 +96,16 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     designPreview.value = active;
   }
 
+  /**
+   * 表單對話框的停用原因（外觀試看中、上次操作未確認）；處理中由各表單的 busy 狀態另外呈現。
+   * 行政表單與各模組的命令表單共用這一個來源。
+   */
+  const formBlockedReason = computed(() => {
+    if (designPreview.value) return DESIGN_PREVIEW_BLOCKED;
+    if (pending.value) return PENDING_BLOCKED;
+    return "";
+  });
+
   function blockedReason(): string | null {
     if (designPreview.value) return DESIGN_PREVIEW_BLOCKED;
     if (busy.value) return BUSY_BLOCKED;
@@ -182,6 +192,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     upload,
     retry,
     blockedReason,
+    formBlockedReason,
     setDesignPreview,
     dismissMessage,
   };
