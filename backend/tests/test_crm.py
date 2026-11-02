@@ -292,6 +292,8 @@ def test_confirm_with_wrong_digest_409_quote_outdated(api: ApiClient) -> None:
     ):
         r = api.mutate("POST", f"{QUOTES}/{qid}/confirm", body)
         assert _error(r) == (409, "quote_outdated")
+    assert api.snapshot() == before
+    assert api.state()["version"] == version
     # 草稿也不能確認
     draft = _quote(api, case)
     before = api.snapshot()
@@ -349,16 +351,35 @@ def test_crm_disabled_403_module_disabled(api: ApiClient) -> None:
 # --- 錯誤碼：每一案都不改變快照與版本 ---------------------------------------------
 
 
-class Scenario:
-    """示範客戶、案件 K 與商機 D（皆為 seed），K 上有草稿報價 Q。"""
+EXPIRES = "2030-01-01T00:00:00.000Z"
 
-    def __init__(self, api: ApiClient) -> None:
+
+class Scenario:
+    """示範客戶、案件 K 與商機 D（皆為 seed），K 上有草稿報價 Q。
+
+    quotes=True 時另建：K 上已被取代的 old 與目前有效的 issued；案件 K2 上 2030-01-01 到期、
+    已發出的 expiring（錯誤碼表用）。"""
+
+    def __init__(self, api: ApiClient, *, quotes: bool = False) -> None:
         api.setup()
         ws = api.snapshot()
         self.customer = ws["customers"][0]["id"]
         self.case = ws["cases"][0]["id"]
         self.deal = ws["deals"][0]["id"]
         self.quote = _quote(api, self.case)
+        if not quotes:
+            return
+        self.old = _quote(api, self.case)
+        _issue(api, self.old)
+        self.issued = _quote(api, self.case, 2000)
+        _issue(api, self.issued)
+        ws = api.snapshot()
+        self.old_digest = _row(ws, "quotes", self.old)["digest"]
+        self.issued_digest = _row(ws, "quotes", self.issued)["digest"]
+        case2 = _create(api, "cases", {"title": "到期案件"})
+        self.expiring = _quote(api, case2, expires_at=EXPIRES)
+        _issue(api, self.expiring)
+        self.expiring_digest = _row(api.snapshot(), "quotes", self.expiring)["digest"]
 
 
 Make = Callable[[Scenario], tuple[str, str, Any]]
@@ -546,6 +567,79 @@ _CASES: list[tuple[str, Make, int, str]] = [
         "record_missing",
     ),
     (
+        "amount_null",
+        lambda s: ("POST", f"{CRM}/deals", {"name": "x", "amount_minor": None}),
+        422,
+        "number_invalid",
+    ),
+    (
+        "amount_fraction",
+        lambda s: ("POST", f"{CRM}/deals", {"name": "x", "amount_minor": 1.5}),
+        422,
+        "number_invalid",
+    ),
+    (
+        "amount_null_update",
+        lambda s: ("PATCH", f"{CRM}/deals/{s.deal}", {"amount_minor": None}),
+        422,
+        "number_invalid",
+    ),
+    (
+        "amount_string_update",
+        lambda s: ("PATCH", f"{CRM}/contacts/{s.deal}", {"amount_minor": "5"}),
+        422,
+        "number_invalid",
+    ),
+    (
+        "amount_over_limit",
+        lambda s: ("POST", f"{CRM}/cases", {"title": "x", "amount_minor": 1_000_000_001}),
+        422,
+        "number_invalid",
+    ),
+    (
+        "issue_issued",
+        lambda s: ("POST", f"{QUOTES}/{s.issued}/issue", {}),
+        409,
+        "quote_immutable",
+    ),
+    (
+        "issue_superseded",
+        lambda s: ("POST", f"{QUOTES}/{s.old}/issue", {}),
+        409,
+        "quote_immutable",
+    ),
+    (
+        "confirm_wrong_digest",
+        lambda s: ("POST", f"{QUOTES}/{s.issued}/confirm", {"digest": "0" * 64}),
+        409,
+        "quote_outdated",
+    ),
+    (
+        "confirm_old_digest",
+        lambda s: ("POST", f"{QUOTES}/{s.issued}/confirm", {"digest": s.old_digest}),
+        409,
+        "quote_outdated",
+    ),
+    (
+        "confirm_no_digest",
+        lambda s: ("POST", f"{QUOTES}/{s.issued}/confirm", {}),
+        409,
+        "quote_outdated",
+    ),
+    (
+        "confirm_superseded",
+        lambda s: ("POST", f"{QUOTES}/{s.old}/confirm", {"digest": s.old_digest}),
+        409,
+        "quote_outdated",
+    ),
+    (
+        # 時鐘固定在到期當下（見 _CLOCK）
+        "confirm_expired",
+        lambda s: ("POST", f"{QUOTES}/{s.expiring}/confirm", {"digest": s.expiring_digest}),
+        409,
+        "quote_outdated",
+    ),
+    (
         "confirm_draft",
         lambda s: ("POST", f"{QUOTES}/{s.quote}/confirm", {"digest": None}),
         409,
@@ -554,11 +648,23 @@ _CASES: list[tuple[str, Make, int, str]] = [
 ]
 
 
+# 需要固定時鐘的案例：建好世界後把 clock.utcnow 換成這個時間
+_CLOCK = {"confirm_expired": datetime(2030, 1, 1, tzinfo=UTC)}
+
+
 @pytest.mark.parametrize(("name", "make", "status", "code"), _CASES, ids=[c[0] for c in _CASES])
 def test_rejections_leave_snapshot_unchanged(
-    api: ApiClient, name: str, make: Make, status: int, code: str
+    api: ApiClient,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    make: Make,
+    status: int,
+    code: str,
 ) -> None:
-    scenario = Scenario(api)
+    scenario = Scenario(api, quotes=True)
+    if name in _CLOCK:
+        fixed = _CLOCK[name]
+        monkeypatch.setattr(clock, "utcnow", lambda: fixed)
     before = api.snapshot()
     version = api.state()["version"]
     method, path, body = make(scenario)

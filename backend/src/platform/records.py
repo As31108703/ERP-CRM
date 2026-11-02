@@ -265,8 +265,8 @@ def _apply(row: CrmRecordRow, p: dict[str, Any]) -> None:
                 raise _fields_invalid()
             row.due_at = parsed_due
     if "amount_minor" in p:
-        # precheck 已檢查為 1..1e9 的整數
-        row.amount_minor = p["amount_minor"]
+        # precheck 已檢查並正規化（5.0 → 5）；這裡再檢查一次，直接呼叫時也不會存入非整數
+        row.amount_minor = check_int(p["amount_minor"], min_=1)
 
 
 def _check_collection(collection: str) -> None:
