@@ -616,3 +616,35 @@ def test_clear_cascades_business_data(api: ApiClient, db_engine: Engine) -> None
     with db_engine.connect() as conn:
         for table in ("wallet", "ledger", "ledger_entry", "product", "product_lot", "purchase"):
             assert conn.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() == 0, table
+
+
+@pytest.mark.parametrize("quantity", [0, -1, 1.5, None, True])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda ctx, pid, q: inventory.push_lot(ctx, pid, q, 100),
+        lambda ctx, pid, q: inventory.consume_fifo(ctx, pid, q, corrupt_code="x"),
+        lambda ctx, pid, q: inventory.reserve(ctx, pid, q, code="x", message="x"),
+        lambda ctx, pid, q: inventory.release_reserved(ctx, pid, q),
+    ],
+    ids=["push_lot", "consume_fifo", "reserve", "release_reserved"],
+)
+def test_stock_moves_reject_non_positive_quantity(
+    ctx: CommandContext, call: Callable, quantity: object
+) -> None:
+    """數量必須是 ≥1 的整數：負數不能變成「反向」異動（例如 consume_fifo(-1) 憑空加庫存）。"""
+    pid = _pid(ctx)
+    inventory.push_lot(ctx, pid, 2, 100)
+    inventory.reserve(ctx, pid, 1, code="x", message="x")
+    before = _snap_product(ctx, pid)
+    with pytest.raises(Problem) as e:
+        call(ctx, pid, quantity)
+    assert (e.value.status, e.value.code) == (422, "number_invalid")
+    assert _snap_product(ctx, pid) == before
+
+
+def test_push_lot_rejects_negative_cost(ctx: CommandContext) -> None:
+    pid = _pid(ctx)
+    with pytest.raises(Problem) as e:
+        inventory.push_lot(ctx, pid, 1, -5)
+    assert (e.value.status, e.value.code) == (422, "number_invalid")

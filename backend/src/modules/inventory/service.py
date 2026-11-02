@@ -1,6 +1,7 @@
 """商品與庫存（B§3.5）：商品建立／更新、採購入庫、FIFO 成本層與預留。
 
-其他模組透過 `push_lot`、`consume_fifo`、`reserve`、`release_reserved` 異動庫存，並以
+其他模組透過 `push_lot`、`consume_fifo`、`reserve`、`release_reserved` 異動庫存（數量一律須為
+≥1 的整數，否則 422 number_invalid，避免負數變成反向異動），並以
 `register_reserved_demand` 申報自己佔用的預留量，供預留一致性檢查加總（Task 6 起）。
 """
 
@@ -77,6 +78,8 @@ def get_product(ctx: CommandContext, product_id: object) -> ProductRow:
 
 def push_lot(ctx: CommandContext, product_id: object, quantity: int, cost_minor: int) -> None:
     """在 FIFO 佇列尾端加入成本層，並增加 on_hand 與 stock_value。"""
+    quantity = check_int(quantity, min_=1)
+    cost_minor = check_int(cost_minor)
     product = get_product(ctx, product_id)
     product.on_hand = check_safe(product.on_hand + quantity)
     product.stock_value_minor = check_safe(
@@ -99,6 +102,7 @@ def consume_fifo(
 
     成本層不足時 409 `corrupt_code`（由呼叫端決定錯誤碼）；不處理預留量。
     """
+    quantity = check_int(quantity, min_=1)
     product = get_product(ctx, product_id)
     lots = lots_of(ctx.db, [product.id])[product.id]
     ensure(sum(lot.quantity for lot in lots) >= quantity, 409, corrupt_code, message)
@@ -124,6 +128,7 @@ def reserve(
     ctx: CommandContext, product_id: object, quantity: int, *, code: str, message: str
 ) -> None:
     """預留 quantity 件；可用量（on_hand - reserved）不足時 409 `code`。"""
+    quantity = check_int(quantity, min_=1)
     product = get_product(ctx, product_id)
     ensure(product.on_hand - product.reserved >= quantity, 409, code, message)
     product.reserved += quantity
@@ -133,6 +138,7 @@ def reserve(
 
 def release_reserved(ctx: CommandContext, product_id: object, quantity: int) -> None:
     """釋放預留量；釋放超過已預留時由一致性檢查擋下。"""
+    quantity = check_int(quantity, min_=1)
     product = get_product(ctx, product_id)
     product.reserved -= quantity
     product.updated_at = ctx.now

@@ -108,9 +108,11 @@ def _settings(request: Request) -> Settings:
 def touch_session(request: Request) -> Iterator[CommandContext]:
     """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，再交出唯讀用的 context。"""
     with Session(request.app.state.engine, expire_on_commit=False) as db:
-        now = clock.utcnow()
         try:
-            row = lock_session(db, session_token(request), now)
+            row = lock_session(db, session_token(request), clock.utcnow())
+            # 鎖可能等了一段時間（同 session 的寫入持鎖中），速率與存取時間以取得鎖之後為準，
+            # 否則 now 可能早於持鎖請求剛開的視窗起點
+            now = clock.utcnow()
             ratelimit.hit(row, now)
             db.commit()
         except BaseException:

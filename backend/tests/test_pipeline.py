@@ -11,7 +11,8 @@ from sqlalchemy import Engine, text
 
 from src.core import clock
 from src.core.problem import Problem
-from src.platform import registry
+from src.platform import pipeline, ratelimit, registry
+from src.platform.context import WorkspaceSessionRow
 from tests.helpers import ApiClient, new_key
 
 ECHO = "/api/v1/_test/echo"
@@ -306,7 +307,10 @@ def test_stale_version_412(api, db_engine):
 # --- 速率限制 -----------------------------------------------------------------
 
 
-def test_rate_limit_120_per_minute(api):
+def test_rate_limit_120_per_minute(api, monkeypatch):
+    # 固定時鐘：120 個請求都落在同一個視窗，retry_after_ms 必為 start + 60001 - now = 60001
+    t0 = clock.utcnow()
+    monkeypatch.setattr(clock, "utcnow", lambda: t0)
     # GET 也計入：1 次 state + 59 次 GET + 60 次寫入 = 120
     state = api.state()
     for _ in range(59):
@@ -316,10 +320,47 @@ def test_rate_limit_120_per_minute(api):
         assert r.status_code == 200, (i, r.text)
     r = api.mutate("POST", ECHO, {}, csrf=state["csrf"], version=state["version"] + 60)
     assert _error(r) == (429, "rate_limit")
-    retry = r.json()["error"]["retry_after_ms"]
-    assert 1 <= retry <= 60_001
-    assert int(r.headers["retry-after"]) >= 1
+    assert r.json()["error"]["retry_after_ms"] == 60_001
+    assert r.headers["retry-after"] == "61"
     assert _error(api.client.get("/api/v1/_test/csrf")) == (429, "rate_limit")
+
+
+def test_rate_limit_retry_never_exceeds_window():
+    """視窗起點晚於 now（並行請求先取得鎖並開了新視窗）時，retry_after_ms 仍不超過 60001。"""
+    now = clock.utcnow()
+    row = WorkspaceSessionRow(
+        token_hash="x", csrf="x", rate_start=now + timedelta(milliseconds=1480), rate_count=120
+    )
+    with pytest.raises(Problem) as e:
+        ratelimit.hit(row, now)
+    assert (e.value.code, e.value.retry_after_ms) == ("rate_limit", 60_001)
+
+
+def test_touch_session_reads_clock_after_lock(api, monkeypatch, db_engine):
+    """GET 的速率計數與最後存取時間用取得 session 列鎖之後的時間，不是排隊前讀到的時間。"""
+    api.state()
+    ticks = iter(range(1, 1000))
+    t0 = clock.utcnow()
+    lock_tick: list[int] = []
+    current = [0]
+
+    def fake_now():
+        current[0] = next(ticks)
+        return t0 + timedelta(seconds=current[0])
+
+    real_lock = pipeline.lock_session
+
+    def tracking_lock(db, token, now):
+        row = real_lock(db, token, now)
+        lock_tick.append(current[0])
+        return row
+
+    monkeypatch.setattr(clock, "utcnow", fake_now)
+    monkeypatch.setattr(pipeline, "lock_session", tracking_lock)
+    assert api.client.get("/api/v1/_test/csrf").status_code == 200
+    with db_engine.connect() as conn:
+        seen = conn.execute(text("SELECT last_seen_at FROM workspace_session")).scalar_one()
+    assert seen > t0 + timedelta(seconds=lock_tick[-1])
 
 
 def test_rate_limit_counts_failed_writes_and_resets(api, monkeypatch):
