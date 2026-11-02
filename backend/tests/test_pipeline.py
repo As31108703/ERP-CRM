@@ -27,7 +27,7 @@ def _scalar(db_engine: Engine, sql: str, **params) -> object:
 
 
 def _seed_workspace(db_engine: Engine, modules: list[str] | None = None) -> None:
-    """直接在資料庫替唯一的 session 建立工作區（Task 4 之前沒有 setup 路由）。"""
+    """直接在資料庫替唯一的 session 建立最小的工作區（不經 setup，因此沒有示範資料）。"""
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -36,6 +36,14 @@ def _seed_workspace(db_engine: Engine, modules: list[str] | None = None) -> None
                 " '測試公司', :modules, 1 FROM workspace_session"
             ),
             {"modules": modules if modules is not None else ["inventory"]},
+        )
+        # 合法的工作區一定有三個系統錢包（wallets 模組的一致性檢查）
+        conn.execute(
+            text(
+                "INSERT INTO wallet (id, workspace_id, kind, name) "
+                "SELECT gen_random_uuid(), w.id, k, k FROM workspace w, "
+                "unnest(ARRAY['business', 'supplier', 'faucet']) AS k"
+            )
         )
 
 

@@ -9,6 +9,8 @@ from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
 from src.modules.catalog.router import router as catalog_router
+from src.modules.inventory.router import router as inventory_router
+from src.modules.wallets.router import router as wallets_router
 from src.modules.workspace.retention import start_scheduler
 from src.modules.workspace.router import router as workspace_router
 
@@ -34,6 +36,9 @@ ROUTERS: list[APIRouter] = [
     health_router,
     catalog_router,
     workspace_router,
+    # 匯入 router 時一併登錄模組（快照、一致性檢查、seed）；wallets 先於 inventory
+    wallets_router,
+    inventory_router,
 ]
 
 

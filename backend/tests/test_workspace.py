@@ -10,6 +10,7 @@ from src.core import clock
 from src.modules.catalog import seed
 from src.modules.catalog.templates import TEMPLATES
 from src.modules.workspace.retention import purge_expired, run_purge
+from src.platform import registry
 from src.platform.registry import MODULES
 from tests.helpers import ApiClient, new_key
 
@@ -316,6 +317,12 @@ def test_auto_setup_skipped_in_public_demo(make_client) -> None:
 # --- 種子資料 -------------------------------------------------------------------
 
 
+def _without_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """只留測試用的 seed：同時移除模組登錄，否則缺少系統錢包會被一致性檢查擋下。"""
+    monkeypatch.setattr(seed, "_SEEDERS", {})
+    monkeypatch.setattr(registry, "_SPECS", {})
+
+
 def test_seed_extension_point(api: ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, list[str], str]] = []
 
@@ -323,10 +330,34 @@ def test_seed_extension_point(api: ApiClient, monkeypatch: pytest.MonkeyPatch) -
         assert ctx.workspace is not None
         calls.append((template.id, list(ctx.workspace.modules), ctx.workspace.company_name))
 
-    monkeypatch.setattr(seed, "_SEEDERS", {})
-    seed.register_seeder("test", fake_seed)
+    _without_modules(monkeypatch)
+    seed.register_seeder("test", fake_seed, order=10)
     api.setup("service", "甲")
     assert calls == [("service", TEMPLATES["service"].modules, "甲")]
+
+
+def test_seeders_run_in_explicit_order(api: ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """執行順序只看 order，與註冊（匯入）順序無關；同名重複註冊時取代原本的設定。"""
+    calls: list[str] = []
+
+    def make(name: str):
+        return lambda ctx, template: calls.append(name)
+
+    _without_modules(monkeypatch)
+    seed.register_seeder("bom", make("bom"), order=50)
+    seed.register_seeder("customer", make("customer"), order=30)
+    seed.register_seeder("wallets", make("wallets"), order=10)
+    seed.register_seeder("products", make("old-products"), order=99)
+    seed.register_seeder("products", make("products"), order=20)
+    api.setup("general", "甲")
+    assert calls == ["wallets", "products", "customer", "bom"]
+
+
+def test_seeder_order_must_be_unique(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(seed, "_SEEDERS", {})
+    seed.register_seeder("a", lambda ctx, t: None, order=10)
+    with pytest.raises(ValueError):
+        seed.register_seeder("b", lambda ctx, t: None, order=10)
 
 
 @pytest.mark.skip(reason="TODO(Task 5+)：各模組接上 seed 函式後，驗證 B§3.0 的示範資料")
