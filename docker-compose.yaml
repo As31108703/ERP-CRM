@@ -37,12 +37,12 @@ services:
     ports:
       - 8000:8000
 
-  # 前端服務於 Task 19 啟用
-  # frontend:
-  #   <<: *default
-  #   build:
-  #     context: ./frontend
-  #   depends_on:
-  #     - backend
-  #   ports:
-  #     - 8080:80
+  # 前端只是 nginx 靜態檔與反向代理，不需要 .env（避免把資料庫帳密帶進容器）
+  frontend:
+    restart: always
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - 8080:80

@@ -1,0 +1,391 @@
+/*
+ * 星軌設計 token（由實作者以表格產生後手動維護）。
+ * 選取方式：<html data-theme-id="bridge|neon|orbital|quantum|foundry|nebula"
+ *               data-theme="dark|light" data-density="comfortable|compact">
+ * 未設定 data-theme-id 時等同 bridge 深色。
+ */
+
+:root {
+  --font-body: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --cut: 14px;
+  --glow-size: 6px;
+  --motion-fast: 120ms ease-out;
+  --motion-base: 200ms;
+  --motion-slow: 480ms ease-out;
+  --rail-width: 228px;
+  --bar-height: 56px;
+  /* 舒適密度 */
+  --pad: 16px;
+  --gap: 12px;
+  --font-size: 15px;
+  --control-h: 36px;
+}
+
+:root[data-density="compact"] {
+  --pad: 10px;
+  --gap: 8px;
+  --font-size: 14px;
+  --control-h: 30px;
+  --cut: 10px;
+}
+
+:root[data-theme="light"] {
+  --glow-size: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms linear;
+    --motion-base: 0ms;
+    --motion-slow: 0ms linear;
+  }
+}
+
+/* ── bridge ── */
+:root, :root[data-theme-id="bridge"] {
+  --bg: #050913;
+  --bg-deep: #02050c;
+  --surface: #0b1528;
+  --surface-2: #0f1c34;
+  --surface-sheen: rgba(56,225,255,.06);
+  --ink: #d6e6ff;
+  --ink-dim: #9db2d4;
+  --ink-faint: #627798;
+  --line: rgba(120,170,230,.18);
+  --line-strong: rgba(120,190,255,.38);
+  --accent: #38e1ff;
+  --accent-ink: #021018;
+  --accent-2: #ffb347;
+  --glow: rgba(56,225,255,.28);
+  --ok: #4dffa6;
+  --warn: #ffc857;
+  --danger: #ff5f7a;
+  --info: #6cb8ff;
+  --grid: rgba(80,150,255,.06);
+  --star: rgba(214,230,255,.75);
+  --nebula-1: rgba(56,120,255,.18);
+  --nebula-2: rgba(255,179,71,.06);
+  --font-display: "Orbitron", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  --panel-radius: 0px;
+  --bracket: 0;
+  --radius-sm: 2px;
+}
+
+:root[data-theme="light"]:not([data-theme-id]), :root[data-theme-id="bridge"][data-theme="light"] {
+  --bg: #e9eff7;
+  --bg-deep: #dbe4f0;
+  --surface: #f7faff;
+  --surface-2: #eef3fb;
+  --surface-sheen: rgba(0,119,168,.05);
+  --ink: #0b1a2e;
+  --ink-dim: #3d5272;
+  --ink-faint: #5f7290;
+  --line: rgba(20,60,110,.16);
+  --line-strong: rgba(0,100,160,.35);
+  --accent: #0077a8;
+  --accent-ink: #ffffff;
+  --accent-2: #a55800;
+  --glow: rgba(0,119,168,.18);
+  --ok: #0f8a52;
+  --warn: #a86400;
+  --danger: #c4253f;
+  --info: #1f63c4;
+  --grid: rgba(20,60,120,.07);
+  --star: rgba(20,40,80,.25);
+  --nebula-1: rgba(0,119,168,.08);
+  --nebula-2: rgba(178,95,0,.05);
+  color-scheme: light;
+}
+
+/* ── neon ── */
+:root[data-theme-id="neon"] {
+  --bg: #0a0612;
+  --bg-deep: #05030a;
+  --surface: #170c26;
+  --surface-2: #1f1032;
+  --surface-sheen: rgba(255,63,164,.06);
+  --ink: #f6eaff;
+  --ink-dim: #c7aee0;
+  --ink-faint: #8a72a4;
+  --line: rgba(255,63,164,.2);
+  --line-strong: rgba(255,100,190,.45);
+  --accent: #ff3fa4;
+  --accent-ink: #1a0010;
+  --accent-2: #35f2d0;
+  --glow: rgba(255,63,164,.32);
+  --ok: #35f2d0;
+  --warn: #ffd23f;
+  --danger: #ff4d6d;
+  --info: #7aa2ff;
+  --grid: rgba(255,63,164,.06);
+  --star: rgba(255,230,250,.7);
+  --nebula-1: rgba(255,63,164,.16);
+  --nebula-2: rgba(53,242,208,.08);
+  --font-display: "Chakra Petch", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: none;
+  --panel-radius: 3px;
+  --bracket: 1;
+  --radius-sm: 2px;
+}
+
+:root[data-theme-id="neon"][data-theme="light"] {
+  --bg: #f7eef6;
+  --bg-deep: #efe1ee;
+  --surface: #fffaff;
+  --surface-2: #f9eef8;
+  --surface-sheen: rgba(200,0,110,.04);
+  --ink: #1e0b24;
+  --ink-dim: #5b3a66;
+  --ink-faint: #7e6088;
+  --line: rgba(150,20,110,.16);
+  --line-strong: rgba(200,0,110,.34);
+  --accent: #c4007a;
+  --accent-ink: #ffffff;
+  --accent-2: #007a68;
+  --glow: rgba(196,0,122,.16);
+  --ok: #00785f;
+  --warn: #9a6a00;
+  --danger: #c21f45;
+  --info: #3550c8;
+  --grid: rgba(150,20,110,.06);
+  --star: rgba(80,20,70,.22);
+  --nebula-1: rgba(196,0,122,.07);
+  --nebula-2: rgba(0,122,104,.05);
+  color-scheme: light;
+}
+
+/* ── orbital ── */
+:root[data-theme-id="orbital"] {
+  --bg: #060b10;
+  --bg-deep: #03060a;
+  --surface: #0f1822;
+  --surface-2: #14202c;
+  --surface-sheen: rgba(124,243,160,.04);
+  --ink: #e2edf4;
+  --ink-dim: #a2b6c4;
+  --ink-faint: #687d8c;
+  --line: rgba(140,190,220,.16);
+  --line-strong: rgba(124,243,160,.35);
+  --accent: #7cf3a0;
+  --accent-ink: #03140a;
+  --accent-2: #6aa8ff;
+  --glow: rgba(124,243,160,.22);
+  --ok: #7cf3a0;
+  --warn: #f4c95d;
+  --danger: #ff6b6b;
+  --info: #6aa8ff;
+  --grid: rgba(124,243,160,.05);
+  --star: rgba(226,237,244,.65);
+  --nebula-1: rgba(106,168,255,.12);
+  --nebula-2: rgba(124,243,160,.06);
+  --font-display: "Exo 2", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: none;
+  --panel-radius: 16px;
+  --bracket: 0;
+  --radius-sm: 10px;
+}
+
+:root[data-theme-id="orbital"][data-theme="light"] {
+  --bg: #eaf0f2;
+  --bg-deep: #dde6ea;
+  --surface: #f9fcfd;
+  --surface-2: #eff5f7;
+  --surface-sheen: rgba(0,120,60,.04);
+  --ink: #0e1b22;
+  --ink-dim: #3e5361;
+  --ink-faint: #64788a;
+  --line: rgba(20,70,90,.15);
+  --line-strong: rgba(0,120,70,.32);
+  --accent: #00804a;
+  --accent-ink: #ffffff;
+  --accent-2: #2a5fc0;
+  --glow: rgba(0,128,74,.15);
+  --ok: #00804a;
+  --warn: #9a6b00;
+  --danger: #c0392b;
+  --info: #2a5fc0;
+  --grid: rgba(20,80,90,.07);
+  --star: rgba(20,50,60,.22);
+  --nebula-1: rgba(42,95,192,.06);
+  --nebula-2: rgba(0,128,74,.05);
+  color-scheme: light;
+}
+
+/* ── quantum ── */
+:root[data-theme-id="quantum"] {
+  --bg: #04080d;
+  --bg-deep: #020509;
+  --surface: #0a151c;
+  --surface-2: #0e1c25;
+  --surface-sheen: rgba(92,255,214,.05);
+  --ink: #dcfbf4;
+  --ink-dim: #98c4bb;
+  --ink-faint: #5f8a82;
+  --line: rgba(92,255,214,.15);
+  --line-strong: rgba(180,140,255,.4);
+  --accent: #5cffd6;
+  --accent-ink: #00140f;
+  --accent-2: #b48cff;
+  --glow: rgba(92,255,214,.25);
+  --ok: #5cffd6;
+  --warn: #ffd166;
+  --danger: #ff6b8b;
+  --info: #b48cff;
+  --grid: rgba(92,255,214,.055);
+  --star: rgba(220,251,244,.7);
+  --nebula-1: rgba(180,140,255,.13);
+  --nebula-2: rgba(92,255,214,.07);
+  --font-display: "Rajdhani", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  --panel-radius: 0px;
+  --bracket: 0;
+  --radius-sm: 2px;
+}
+
+:root[data-theme-id="quantum"][data-theme="light"] {
+  --bg: #e8f3f1;
+  --bg-deep: #d9eae7;
+  --surface: #f8fdfc;
+  --surface-2: #edf7f5;
+  --surface-sheen: rgba(0,130,110,.04);
+  --ink: #06201b;
+  --ink-dim: #355a53;
+  --ink-faint: #5a7a74;
+  --line: rgba(0,90,80,.15);
+  --line-strong: rgba(100,60,190,.3);
+  --accent: #00806a;
+  --accent-ink: #ffffff;
+  --accent-2: #6a3fc8;
+  --glow: rgba(0,128,106,.15);
+  --ok: #00806a;
+  --warn: #946200;
+  --danger: #c2264f;
+  --info: #6a3fc8;
+  --grid: rgba(0,90,80,.07);
+  --star: rgba(10,50,45,.22);
+  --nebula-1: rgba(106,63,200,.06);
+  --nebula-2: rgba(0,128,106,.05);
+  color-scheme: light;
+}
+
+/* ── foundry ── */
+:root[data-theme-id="foundry"] {
+  --bg: #0d0907;
+  --bg-deep: #070403;
+  --surface: #1c1510;
+  --surface-2: #241b14;
+  --surface-sheen: rgba(255,138,61,.05);
+  --ink: #f6e7d7;
+  --ink-dim: #c9ae95;
+  --ink-faint: #8a735f;
+  --line: rgba(255,170,110,.16);
+  --line-strong: rgba(255,138,61,.42);
+  --accent: #ff8a3d;
+  --accent-ink: #1a0800;
+  --accent-2: #ffd166;
+  --glow: rgba(255,138,61,.28);
+  --ok: #9be36b;
+  --warn: #ffd166;
+  --danger: #ff5a4e;
+  --info: #7fb2ff;
+  --grid: rgba(255,138,61,.05);
+  --star: rgba(255,220,190,.55);
+  --nebula-1: rgba(255,90,40,.14);
+  --nebula-2: rgba(255,209,102,.06);
+  --font-display: "Chakra Petch", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: none;
+  --panel-radius: 3px;
+  --bracket: 1;
+  --radius-sm: 2px;
+}
+
+:root[data-theme-id="foundry"][data-theme="light"] {
+  --bg: #f4ede6;
+  --bg-deep: #ebe0d5;
+  --surface: #fffbf7;
+  --surface-2: #f8f0e8;
+  --surface-sheen: rgba(190,80,0,.04);
+  --ink: #22140a;
+  --ink-dim: #5e4634;
+  --ink-faint: #806652;
+  --line: rgba(110,60,20,.16);
+  --line-strong: rgba(190,80,0,.34);
+  --accent: #b04a06;
+  --accent-ink: #ffffff;
+  --accent-2: #806000;
+  --glow: rgba(184,80,10,.16);
+  --ok: #3c7d17;
+  --warn: #8a6300;
+  --danger: #b8291f;
+  --info: #2d5fb0;
+  --grid: rgba(110,60,20,.07);
+  --star: rgba(60,30,10,.2);
+  --nebula-1: rgba(184,80,10,.06);
+  --nebula-2: rgba(138,99,0,.05);
+  color-scheme: light;
+}
+
+/* ── nebula ── */
+:root[data-theme-id="nebula"] {
+  --bg: #080614;
+  --bg-deep: #040310;
+  --surface: #141031;
+  --surface-2: #1b163e;
+  --surface-sheen: rgba(157,123,255,.06);
+  --ink: #ece8ff;
+  --ink-dim: #b6aedb;
+  --ink-faint: #7c74a3;
+  --line: rgba(157,123,255,.18);
+  --line-strong: rgba(255,126,182,.38);
+  --accent: #9d7bff;
+  --accent-ink: #0c0420;
+  --accent-2: #ff7eb6;
+  --glow: rgba(157,123,255,.3);
+  --ok: #6ee7b7;
+  --warn: #fcd34d;
+  --danger: #ff6b8a;
+  --info: #7cc4ff;
+  --grid: rgba(157,123,255,.05);
+  --star: rgba(236,232,255,.75);
+  --nebula-1: rgba(157,123,255,.2);
+  --nebula-2: rgba(255,126,182,.1);
+  --font-display: "Exo 2", "Noto Sans TC", sans-serif;
+  color-scheme: dark;
+  --panel-clip: none;
+  --panel-radius: 16px;
+  --bracket: 0;
+  --radius-sm: 10px;
+}
+
+:root[data-theme-id="nebula"][data-theme="light"] {
+  --bg: #efecfa;
+  --bg-deep: #e3def5;
+  --surface: #fcfbff;
+  --surface-2: #f3f0fd;
+  --surface-sheen: rgba(100,60,220,.04);
+  --ink: #170f33;
+  --ink-dim: #4b4270;
+  --ink-faint: #6f6894;
+  --line: rgba(70,40,160,.15);
+  --line-strong: rgba(190,40,110,.3);
+  --accent: #6236d9;
+  --accent-ink: #ffffff;
+  --accent-2: #b3226c;
+  --glow: rgba(98,54,217,.16);
+  --ok: #05795a;
+  --warn: #8f6300;
+  --danger: #c0264f;
+  --info: #2763b8;
+  --grid: rgba(70,40,160,.06);
+  --star: rgba(40,20,90,.2);
+  --nebula-1: rgba(98,54,217,.07);
+  --nebula-2: rgba(179,34,108,.05);
+  color-scheme: light;
+}
