@@ -1,0 +1,165 @@
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
+import { ApiError, get, mutate, retryPending, setSession } from "../api/client";
+import { readPending, type MutateMethod, type PendingOperation } from "../api/pending";
+import type { MutationResult, TemplatesResponse, Workbench, WorkspaceView } from "../api/types";
+
+export const API = {
+  view: "/api/v1/workspace/view",
+  templates: "/api/templates",
+  workbench: "/api/v1/workbench",
+} as const;
+
+export const DESIGN_PREVIEW_BLOCKED = "請先套用或取消外觀試看，再進行資料操作。";
+export const PENDING_BLOCKED = "上次操作的結果尚未確認，請先按「確認原操作結果」。";
+export const BUSY_BLOCKED = "上一個操作仍在處理中，請稍候。";
+export const NO_VIEW_BLOCKED = "尚未取得工作區狀態，請按「重新讀取」。";
+export const SAVED_MESSAGE = "已儲存模擬操作。";
+export const RECOVERED_MESSAGE = "已確認並恢復原操作。";
+
+function messageOf(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  return "發生未預期的錯誤，請重新讀取。";
+}
+
+/** 讀取尚未上線（404）的端點時視為「暫不可用」，回傳 null，不讓整頁失敗。 */
+async function optional<T>(path: string): Promise<T | null> {
+  try {
+    return await get<T>(path);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export const useWorkspaceStore = defineStore("workspace", () => {
+  const view = ref<WorkspaceView | null>(null);
+  const templates = ref<TemplatesResponse | null>(null);
+  const workbench = ref<Workbench | null>(null);
+  const busy = ref(false);
+  const pending = ref<PendingOperation | null>(readPending());
+  const error = ref("");
+  const message = ref("");
+  const loaded = ref(false);
+  const designPreview = ref(false);
+
+  const hasWorkspace = computed(() => Boolean(view.value?.workspace));
+
+  let firstLoad: Promise<void> | null = null;
+
+  async function refresh(): Promise<void> {
+    try {
+      const [v, t, w] = await Promise.all([
+        optional<WorkspaceView>(API.view),
+        optional<TemplatesResponse>(API.templates),
+        optional<Workbench>(API.workbench),
+      ]);
+      view.value = v;
+      templates.value = t;
+      workbench.value = v?.workspace ? w : null;
+      if (v) setSession({ csrf: v.csrf, version: v.version });
+      error.value = "";
+    } catch (err) {
+      error.value = messageOf(err);
+    } finally {
+      pending.value = readPending();
+      loaded.value = true;
+    }
+  }
+
+  /** 第一次讀取完成前，路由守衛等待這個 promise，避免在狀態未知時誤導向。 */
+  function ready(): Promise<void> {
+    if (loaded.value) return Promise.resolve();
+    firstLoad ??= refresh();
+    return firstLoad;
+  }
+
+  /** 由外觀設定（Task 20 的 preferences store）在試看開始／結束時呼叫。 */
+  function setDesignPreview(active: boolean): void {
+    designPreview.value = active;
+  }
+
+  function blockedReason(): string | null {
+    if (designPreview.value) return DESIGN_PREVIEW_BLOCKED;
+    if (busy.value) return BUSY_BLOCKED;
+    if (pending.value) return PENDING_BLOCKED;
+    if (!view.value) return NO_VIEW_BLOCKED;
+    return null;
+  }
+
+  async function run<T = MutationResult>(method: MutateMethod, path: string, body: unknown): Promise<T | null> {
+    const blocked = blockedReason();
+    if (blocked) {
+      error.value = blocked;
+      return null;
+    }
+    busy.value = true;
+    error.value = "";
+    message.value = "";
+    try {
+      const result = await mutate<T>(method, path, body);
+      pending.value = readPending();
+      message.value = SAVED_MESSAGE;
+      await refresh();
+      return result;
+    } catch (err) {
+      error.value = messageOf(err);
+      pending.value = readPending();
+      if (err instanceof ApiError && (err.status === 409 || err.status === 412)) {
+        await refresh();
+        error.value = messageOf(err);
+      }
+      return null;
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  /** 以同一把 key 重送上次未確認的操作。 */
+  async function retry<T = MutationResult>(): Promise<T | null> {
+    if (busy.value) return null;
+    busy.value = true;
+    error.value = "";
+    message.value = "";
+    try {
+      const result = await retryPending<T>();
+      pending.value = readPending();
+      message.value = RECOVERED_MESSAGE;
+      await refresh();
+      return result;
+    } catch (err) {
+      error.value = messageOf(err);
+      pending.value = readPending();
+      if (err instanceof ApiError && (err.status === 409 || err.status === 412)) {
+        await refresh();
+        error.value = messageOf(err);
+      }
+      return null;
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  function dismissMessage(): void {
+    message.value = "";
+  }
+
+  return {
+    view,
+    templates,
+    workbench,
+    busy,
+    pending,
+    error,
+    message,
+    loaded,
+    designPreview,
+    hasWorkspace,
+    refresh,
+    ready,
+    run,
+    retry,
+    setDesignPreview,
+    dismissMessage,
+  };
+});

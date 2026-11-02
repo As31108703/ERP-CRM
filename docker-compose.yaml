@@ -37,12 +37,11 @@ services:
     ports:
       - 8000:8000
 
-  # 前端服務於 Task 19 啟用
-  # frontend:
-  #   <<: *default
-  #   build:
-  #     context: ./frontend
-  #   depends_on:
-  #     - backend
-  #   ports:
-  #     - 8080:80
+  frontend:
+    <<: *default
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - 8080:80

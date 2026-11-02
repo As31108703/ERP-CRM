@@ -1,0 +1,52 @@
+import { createRouter, createWebHashHistory, type RouterHistory, type RouteRecordRaw } from "vue-router";
+import { useWorkspaceStore } from "./stores/workspace";
+
+export const MODULE_ROUTES = ["crm", "inventory", "sales", "wallets", "services", "manufacturing", "projects"] as const;
+
+/** 沒有工作區時仍可進入的頁面，其他一律導向 /build。 */
+export const SETUP_ROUTES = ["design", "custom", "capabilities", "blueprint", "build"] as const;
+
+const Placeholder = () => import("./views/PlaceholderView.vue");
+
+const named: { name: string; title: string }[] = [
+  { name: "build", title: "快速上手" },
+  { name: "custom", title: "自訂建置" },
+  { name: "overview", title: "工作總覽" },
+  { name: "learning", title: "沉浸教學" },
+  { name: "design", title: "設計模板" },
+  { name: "capabilities", title: "功能地圖" },
+  { name: "blueprint", title: "系統藍圖" },
+  { name: "administration", title: "行政工作台" },
+  { name: "reports", title: "模擬報表" },
+  { name: "settings", title: "設定與資料" },
+];
+
+export const routes: RouteRecordRaw[] = [
+  { path: "/", redirect: "/overview" },
+  ...named.map(({ name, title }) => ({ path: `/${name}`, name, component: Placeholder, meta: { title } })),
+  {
+    path: `/m/:module(${MODULE_ROUTES.join("|")})`,
+    name: "module",
+    component: Placeholder,
+    meta: { title: "模組" },
+  },
+  { path: "/:rest(.*)*", redirect: "/overview" },
+];
+
+export function createAppRouter(history: RouterHistory = createWebHashHistory()) {
+  const router = createRouter({ history, routes });
+
+  router.beforeEach(async (to) => {
+    const store = useWorkspaceStore();
+    await store.ready();
+    const name = typeof to.name === "string" ? to.name : "";
+    if (!store.hasWorkspace) {
+      if (!(SETUP_ROUTES as readonly string[]).includes(name)) return { path: "/build" };
+    } else if (name === "custom") {
+      return { path: "/overview" };
+    }
+    return true;
+  });
+
+  return router;
+}
