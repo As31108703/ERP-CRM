@@ -122,32 +122,29 @@ export const useUiStore = defineStore("ui", () => {
   }
 
   /**
-   * 切換釘選：只新增或移除這一筆，其他已存的釘選（包含被模組停用或紀錄不存在而隱藏的）一律保留。
-   * 上限以畫面上看得到的釘選計算；達上限時回傳提示訊息，成功回傳 null。
-   * 儲存最多 PIN_LIMIT 筆：新增時若已滿，才依序捨棄紀錄已刪除（模組仍啟用）的釘選、最舊的隱藏釘選來騰出空間，
-   * 看得到的釘選不會被捨棄。
+   * 仍然有效的已存釘選（含隱藏的）：剔除未知種類，以及模組啟用中卻找不到紀錄的（已刪除）。
+   * 模組停用或模組對應不符而隱藏的釘選照樣保留，日後重新啟用時會再出現。
+   */
+  function storedPins(): TargetRef[] {
+    const ws = workspace.view?.workspace;
+    return raw.value.filter(
+      (p) => isRecordKind(p.kind) && !(ws && pinModuleActive(p, ws.modules) && !pinVisible(p, ws)),
+    );
+  }
+
+  /**
+   * 切換釘選：只新增或移除這一筆，其他有效的已存釘選（包含隱藏的）一律保留，不會被擠掉。
+   * 上限以全部有效的已存釘選計算；已達上限時回傳提示訊息且不改動儲存，成功回傳 null。
    */
   function togglePin(target: TargetRef): string | null {
     const same = (p: TargetRef) => p.kind === target.kind && p.id === target.id;
-    if (raw.value.some(same)) {
-      savePins(raw.value.filter((p) => !same(p)));
+    const stored = storedPins();
+    if (stored.some(same)) {
+      savePins(stored.filter((p) => !same(p)));
       return null;
     }
-    if (pins.value.length >= PIN_LIMIT) return PIN_LIMIT_MESSAGE;
-    const next = [...raw.value, { module: target.module, kind: target.kind, id: target.id }];
-    const ws = workspace.view?.workspace;
-    if (ws && next.length > PIN_LIMIT) {
-      const visible = new Set(pins.value);
-      const added = next[next.length - 1];
-      const hidden = (p: TargetRef) => p !== added && !visible.has(p);
-      while (next.length > PIN_LIMIT) {
-        const deleted = next.findIndex((p) => hidden(p) && pinModuleActive(p, ws.modules));
-        const i = deleted >= 0 ? deleted : next.findIndex(hidden);
-        if (i < 0) break;
-        next.splice(i, 1);
-      }
-    }
-    savePins(next);
+    if (stored.length >= PIN_LIMIT) return PIN_LIMIT_MESSAGE;
+    savePins([...stored, { module: target.module, kind: target.kind, id: target.id }]);
     return null;
   }
 

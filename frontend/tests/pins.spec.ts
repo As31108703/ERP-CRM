@@ -90,11 +90,11 @@ describe("pins", () => {
     expect(wrapper.text()).toContain("釘選");
     expect(wrapper.findAll("[data-testid=pinned-record]")).toHaveLength(0);
   });
-  it("toggling one pin keeps pins hidden by a disabled module or missing record", async () => {
+  it("toggling one pin keeps pins hidden by a disabled module and drops deleted records", async () => {
     const stored = [
       { module: "projects", kind: "task", id: "t1" },
       { module: "sales", kind: "order", id: "o1" },
-      { module: "sales", kind: "order", id: "restored-later" },
+      { module: "sales", kind: "order", id: "gone" },
     ];
     window.sessionStorage.setItem(KEY, JSON.stringify(stored));
     const ws = workspace({ orders: [order("o1"), order("o2")], tasks: [{ id: "t1", title: "盤點", status: "todo" }] });
@@ -102,17 +102,17 @@ describe("pins", () => {
     const ui = useUiStore();
     expect(ui.pins.map((p) => p.id)).toEqual(["o1"]);
 
-    // 新增一筆：其他已存的釘選（含目前看不到的）全部保留。
+    // 新增一筆：隱藏（模組停用）的釘選保留，已刪除紀錄的釘選剔除。
     expect(ui.togglePin({ module: "sales", kind: "order", id: "o2" })).toBeNull();
     expect(JSON.parse(window.sessionStorage.getItem(KEY) ?? "[]")).toEqual([
-      ...stored,
+      stored[0],
+      stored[1],
       { module: "sales", kind: "order", id: "o2" },
     ]);
     // 取消一筆：只移除那一筆。
     expect(ui.togglePin({ module: "sales", kind: "order", id: "o1" })).toBeNull();
     expect(JSON.parse(window.sessionStorage.getItem(KEY) ?? "[]")).toEqual([
       stored[0],
-      stored[2],
       { module: "sales", kind: "order", id: "o2" },
     ]);
 
@@ -122,32 +122,43 @@ describe("pins", () => {
     expect(ui.pins.map((p) => p.id)).toEqual(["t1", "o2"]);
   });
 
-  it("the limit counts visible pins; a full store makes room by dropping hidden pins only", async () => {
+  it("the limit counts all valid stored pins, hidden ones included, and never evicts", async () => {
     const orders = Array.from({ length: 24 }, (_, i) => order(`o${i}`));
-    const hidden = [
-      { module: "projects", kind: "task", id: "t1" },
-      { module: "sales", kind: "order", id: "gone" },
-    ];
+    const pin = (id: string) => ({ module: "sales", kind: "order", id });
+    // 1 筆隱藏（專案模組停用）＋ 22 筆可見 ＋ 1 筆已刪除：有效 23 筆。
     window.sessionStorage.setItem(
       KEY,
-      JSON.stringify([...hidden, ...orders.slice(0, 22).map((o) => ({ module: "sales", kind: "order", id: o.id }))]),
+      JSON.stringify([
+        { module: "projects", kind: "task", id: "t1" },
+        ...orders.slice(0, 22).map((o) => pin(o.id)),
+        pin("gone"),
+      ]),
     );
-    const { wrapper } = await mountOverview(PinnedRecords, workspace({ orders }));
+    const ws = workspace({ orders, tasks: [{ id: "t1", title: "盤點", status: "todo" }] });
+    const { wrapper } = await mountOverview(PinnedRecords, ws);
     const ui = useUiStore();
     expect(wrapper.get("[data-testid=pinned-count]").text()).toBe("22／24");
 
-    // 畫面顯示還有空位就能釘選；儲存已滿時優先捨棄已刪除紀錄，再捨棄最舊的隱藏釘選。
-    expect(ui.togglePin({ module: "sales", kind: "order", id: "o22" })).toBeNull();
-    let saved = JSON.parse(window.sessionStorage.getItem(KEY) ?? "[]") as { id: string }[];
-    expect(saved).toHaveLength(24);
-    expect(saved.map((p) => p.id)).toContain("t1");
-    expect(saved.map((p) => p.id)).not.toContain("gone");
+    // 已刪除的不佔名額：第 24 筆有效釘選可以加入。
+    expect(ui.togglePin(pin("o22"))).toBeNull();
+    const full = window.sessionStorage.getItem(KEY);
+    const fullIds = (JSON.parse(full ?? "[]") as { id: string }[]).map((p) => p.id);
+    expect(fullIds).toHaveLength(24);
+    expect(fullIds).toContain("t1");
+    expect(fullIds).not.toContain("gone");
 
-    expect(ui.togglePin({ module: "sales", kind: "order", id: "o23" })).toBeNull();
-    saved = JSON.parse(window.sessionStorage.getItem(KEY) ?? "[]") as { id: string }[];
-    expect(saved).toHaveLength(24);
-    expect(saved.map((p) => p.id)).toEqual(orders.map((o) => o.id));
+    // 有效 24 筆（含 1 筆隱藏）：拒絕新增，儲存不變。
+    expect(ui.togglePin(pin("o23"))).toBe("最多釘選 24 筆紀錄，請先取消一筆釘選。");
+    expect(window.sessionStorage.getItem(KEY)).toBe(full);
     await flush();
-    expect(wrapper.get("[data-testid=pinned-count]").text()).toBe("24／24");
+    expect(wrapper.get("[data-testid=pinned-count]").text()).toBe("23／24");
+
+    // 取消一筆後就能再加入，隱藏的釘選始終保留。
+    expect(ui.togglePin(pin("o0"))).toBeNull();
+    expect(ui.togglePin(pin("o23"))).toBeNull();
+    const saved = (JSON.parse(window.sessionStorage.getItem(KEY) ?? "[]") as { id: string }[]).map((p) => p.id);
+    expect(saved).toHaveLength(24);
+    expect(saved).toContain("t1");
+    expect(saved).not.toContain("o0");
   });
 });
