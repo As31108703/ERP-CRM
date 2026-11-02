@@ -6,6 +6,7 @@ from typing import Annotated
 import pytest
 from fastapi import APIRouter, Depends
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel import Session
 
@@ -37,8 +38,16 @@ def _app_with_test_routes(test_settings):
     def use_db(db: Annotated[Session, Depends(get_db)]):
         return {"one": db.execute(text("SELECT 1")).scalar_one()}
 
+    @router.post("/api/v1/_test/typed")
+    def typed(body: TypedBody):
+        return {"quantity": body.quantity}
+
     app.include_router(router)
     return app
+
+
+class TypedBody(BaseModel):
+    quantity: int
 
 
 @pytest.fixture
@@ -89,6 +98,45 @@ def test_unexpected_error_is_internal_error(test_client):
 def test_security_headers_on_api_responses(client):
     r = client.get("/api/health")
     assert r.status_code == 200
+    _assert_security_headers(r)
+
+
+def test_unknown_api_route_is_not_found(test_client):
+    r = test_client.get("/api/v1/nope")
+    assert r.status_code == 404
+    assert r.json() == {"error": {"code": "not_found", "message": "找不到指定的 API"}}
+    _assert_security_headers(r)
+
+
+def test_wrong_method_is_method_invalid(test_client):
+    r = test_client.post("/api/health")
+    assert r.status_code == 405
+    assert r.json() == {"error": {"code": "method_invalid", "message": "此 API 不支援這個請求方法"}}
+    assert r.headers["allow"] == "GET"
+    _assert_security_headers(r)
+
+
+def test_other_http_exception_keeps_status(test_settings, db_engine):
+    from fastapi import HTTPException
+
+    app = create_app(test_settings)
+
+    @app.get("/api/v1/_test/teapot")
+    def teapot():
+        raise HTTPException(418)
+
+    with TestClient(app) as c:
+        r = c.get("/api/v1/_test/teapot")
+    assert r.status_code == 418
+    assert r.json()["error"]["code"] == "http_error"
+    _assert_security_headers(r)
+
+
+def test_validation_error_is_payload_invalid_without_input(test_client):
+    r = test_client.post("/api/v1/_test/typed", json={"quantity": "secret-value-123"})
+    assert r.status_code == 422
+    assert r.json() == {"error": {"code": "payload_invalid", "message": "請求內容格式不正確"}}
+    assert "secret-value-123" not in r.text
     _assert_security_headers(r)
 
 
