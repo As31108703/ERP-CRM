@@ -3,9 +3,9 @@
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
-from src.modules.administration import invariants, snapshot
+from src.modules.administration import csv_export, invariants, snapshot, views
 from src.modules.administration.attendance import (
     create_attendance,
     update_attendance,
@@ -44,7 +44,14 @@ from src.modules.administration.shifts import (
 from src.modules.administration.staff import create_staff, update_staff
 from src.modules.administration.units import create_unit, update_unit
 from src.platform.context import CommandContext
-from src.platform.pipeline import CommandPipeline, Handler, MutationResponse, get_pipeline, raw_body
+from src.platform.pipeline import (
+    CommandPipeline,
+    Handler,
+    MutationResponse,
+    get_pipeline,
+    raw_body,
+    touch_session,
+)
 from src.platform.registry import ModuleSpec, register
 
 MODULE = snapshot.MODULE
@@ -94,6 +101,7 @@ HANDLERS: dict[str, Callable[[CommandContext, dict[str, Any]], str | None]] = {
 router = APIRouter(prefix="/api/v1/administration")
 Pipeline = Depends(get_pipeline)
 Raw = Depends(raw_body)
+Touch = Depends(touch_session)
 
 
 def _with_id(handler: Handler, row_id: str) -> Handler:
@@ -327,3 +335,45 @@ def notice_restore(
     row_id: str, request: Request, raw: bytes = Raw, pipeline: CommandPipeline = Pipeline
 ) -> MutationResponse:
     return _mutate(pipeline, request, raw, "office.notice.restore", row_id)
+
+
+# --- 唯讀檢視（A§4–A§6）：經 touch_session 計入速率限制，不改版本與資料 -----------------
+
+
+@router.get("/overview")
+def overview(request: Request, ctx: CommandContext = Touch) -> dict[str, Any]:
+    """待辦概覽磚與入門路線；`now`（ISO，測試用）預設伺服器時間，`week` 預設 now 所在週。"""
+    desk = views.load(ctx)
+    query = request.query_params
+    now = views.parse_now(query, ctx.now)
+    return views.overview(desk, now, views.parse_week(query, now), views.parse_unit(query))
+
+
+@router.get("/rows")
+def rows(request: Request, ctx: CommandContext = Touch) -> dict[str, Any]:
+    """目前分頁的篩選結果與篩選統計；與 CSV 匯出共用 `views.filter_rows`。"""
+    desk = views.load(ctx)
+    return views.rows_view(desk, views.parse_params(request.query_params, ctx.now))
+
+
+@router.get("/attendance-diff")
+def attendance_diff(request: Request, ctx: CommandContext = Touch) -> list[dict[str, Any]]:
+    desk = views.load(ctx)
+    query = request.query_params
+    week = views.parse_week(query, views.parse_now(query, ctx.now))
+    return views.attendance_diff(desk, week, views.parse_unit(query))
+
+
+@router.get("/export.csv")
+def export_csv(request: Request, ctx: CommandContext = Touch) -> Response:
+    desk = views.load(ctx)
+    params = views.parse_params(request.query_params, ctx.now)
+    assert ctx.workspace is not None
+    name, content = csv_export.export(
+        desk, params, company_name=ctx.workspace.company_name, version=ctx.session_row.version
+    )
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
