@@ -24,6 +24,8 @@ from src.platform.context import WorkspaceRow
 
 MODULE = "administration"
 KEY = "administration"
+# 以 id 識別的行政資料列（ModuleSpec.id_paths）：各集合與更正紀錄
+ID_PATHS = tuple(f"{KEY}.{name}" for name in (*COLLECTIONS, "changes"))
 STAMP_KEYS = ("id", "created_at", "updated_at")
 # 各集合資料列的欄位（不含 stamp），輸出順序即此順序
 ROW_KEYS: dict[str, tuple[str, ...]] = {
@@ -142,18 +144,6 @@ def snapshot(db: Session, workspace_id: str) -> dict[str, Any]:
 
 
 # --- 還原 -------------------------------------------------------------------------
-
-
-def _collect_ids(value: Any, ids: set[str]) -> None:
-    """收集任意巢狀資料中的 `id` 字串（小寫），供跨集合的識別碰撞檢查。"""
-    if isinstance(value, list):
-        for child in value:
-            _collect_ids(child, ids)
-    elif isinstance(value, dict):
-        if isinstance(value.get("id"), str):
-            ids.add(value["id"].lower())
-        for child in value.values():
-            _collect_ids(child, ids)
 
 
 def _uid(value: Any) -> uuid.UUID:
@@ -318,9 +308,9 @@ def _normalized(collection: str, row: Any) -> dict[str, Any]:
 def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
     """ModuleSpec.restore：驗證並寫入 `data["administration"]`，取代工作區現有的行政資料。
 
-    行政資料存在與否須與 workspace.modules 一致（422 office_schema_invalid）；識別碼在整份資料
-    中不分大小寫不得重複（422 id_collision）。跨資料列的規則（參照、循環、代碼重複、啟用狀態）
-    由命令管線之後執行的 invariants 檢查。
+    行政資料存在與否須與 workspace.modules 一致（422 office_schema_invalid）。識別碼在整份備份
+    中不得重複，由備份匯入依各模組的 ID_PATHS 統一檢查（422 id_collision）；跨資料列的規則
+    （參照、循環、代碼重複、啟用狀態）由命令管線之後執行的 invariants 檢查。
     """
     is_enabled = enabled(db, workspace_id)
     if KEY not in data:
@@ -329,15 +319,6 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
     ensure(is_enabled, 422, "office_schema_invalid", "未啟用行政模組不可匯入行政資料")
     adm = data[KEY]
     v.strict_keys(adm, set(COLLECTIONS), {"changes"})
-
-    ids: set[str] = set()
-    for key, value in data.items():
-        if key != KEY:
-            _collect_ids(value, ids)
-
-    def claim(row_id: uuid.UUID) -> None:
-        ensure(str(row_id) not in ids, 422, "id_collision", "行政紀錄識別重複")
-        ids.add(str(row_id))
 
     parsed: dict[str, list[dict[str, Any]]] = {}
     transitions: dict[uuid.UUID, list[dict[str, Any]]] = {}
@@ -352,7 +333,6 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
         parsed[name] = []
         for row in rows:
             values = _parse_row(name, row)
-            claim(values["id"])
             if name == "requests":
                 transitions[values["id"]] = _parse_transitions(row["transitions"])
             parsed[name].append(values)
@@ -366,7 +346,6 @@ def restore(db: Session, workspace_id: str, data: dict[str, Any]) -> None:
     changes = []
     for raw in raw_changes:
         change = _parse_change(raw)
-        claim(change["id"])
         changes.append(change)
 
     _delete_all(db, workspace_id)

@@ -8,7 +8,7 @@ from src.modules.crm import records as crm_records
 from src.platform import records, registry
 from src.platform.context import CommandContext
 from src.platform.pipeline import CommandPipeline, MutationResponse, get_pipeline, raw_body
-from src.platform.records import Handler
+from src.platform.records import RECORD_COLLECTIONS, Handler
 
 MODULE = "crm"
 
@@ -52,6 +52,8 @@ SPEC = registry.ModuleSpec(
         invariants.check_deals,
         invariants.check_quotes,
     ),
+    # 通用紀錄（含 projects 的 tasks、milestones）由 crm 的快照輸出
+    id_paths=(*RECORD_COLLECTIONS, "deals.followups", "quotes"),
 )
 registry.register(SPEC)
 register_seeder(MODULE, service.seed_crm, order=SEED_CRM)

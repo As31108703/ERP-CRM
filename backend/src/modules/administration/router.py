@@ -62,6 +62,7 @@ register(
         snapshot=snapshot.snapshot,
         restore=snapshot.restore,
         invariants=(invariants.check,),
+        id_paths=snapshot.ID_PATHS,
     )
 )
 

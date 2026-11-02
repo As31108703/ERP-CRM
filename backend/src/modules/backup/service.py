@@ -8,11 +8,12 @@ collections 是各模組 `ModuleSpec.snapshot` 的集合加上 history，不含 
 2. 刪除現有工作區（業務資料以外鍵串聯刪除）；
 3. 建立新工作區（新 generation_id），依 registry 順序執行每個模組的 restore，不論模組是否啟用；
 4. 還原 history；
-之後由命令管線執行 `invariants.check_all` 並把版本號加 1。
+之後由命令管線把版本號加 1、執行 `invariants.check_all`（含最終的工作區大小檢查）。
 """
 
 import uuid
 from collections.abc import Iterator
+from itertools import chain
 from typing import Any
 
 from pydantic import ValidationError
@@ -107,47 +108,27 @@ def _check_simulation(backup: Backup) -> None:
     )
 
 
-def _ids(c: Collections) -> Iterator[str]:
-    """所有以 id 識別的資料列（含訂單品項、跟進、交付與 history）；行政資料由行政模組檢查。"""
-    groups: list[list[Any]] = [
-        c.products,
-        c.purchases,
-        c.wallets,
-        c.ledger,
-        c.orders,
-        c.customers,
-        c.contacts,
-        c.deals,
-        c.cases,
-        c.quotes,
-        c.services,
-        c.boms,
-        c.work_orders,
-        c.tasks,
-        c.milestones,
-        c.history,
-    ]
-    for rows in groups:
-        for row in rows:
-            yield row.id
-    for order in c.orders:
-        for line in order.lines:
-            yield line.id
-    for deal in c.deals:
-        for followup in deal.followups:
-            yield followup.id
-    for service in c.services:
-        for delivery in service.deliveries:
-            yield delivery.id
+def _id_key(value: Any) -> str | None:
+    """比對用的識別碼：UUID 轉成標準小寫形式，其他字串以 casefold 比較（不分大小寫）；
+    不是字串時略過，由各模組的結構檢查回正式錯誤碼。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        return value.casefold()
 
 
-def _check_ids(c: Collections) -> None:
-    """識別碼在整份備份中不分大小寫不得重複（B§2）。"""
-    seen: set[uuid.UUID] = set()
-    for raw in _ids(c):
-        value = uuid.UUID(raw)
-        ensure(value not in seen, 422, "id_collision", "備份中的紀錄識別重複")
-        seen.add(value)
+def _check_ids(collections: dict[str, Any]) -> None:
+    """B§2：所有以 id 識別的資料列（各模組 ModuleSpec.id_paths 宣告的資料列，含訂單品項、
+    跟進、交付與行政資料，加上 history）在整份備份中不分大小寫不得重複。"""
+    seen: set[str] = set()
+    for value in chain(registry.record_ids(collections), registry.ids_at(collections, "history")):
+        key = _id_key(value)
+        if key is None:
+            continue
+        ensure(key not in seen, 422, "id_collision", "備份中的紀錄識別重複")
+        seen.add(key)
 
 
 def _check_rows(c: Collections) -> None:
@@ -197,7 +178,7 @@ def import_backup(ctx: CommandContext, payload: dict[str, Any]) -> str | None:
     template = get_template(meta.industry)
     name = normalize_company_name(meta.company_name)
     modules = resolve_modules(template.id, list(meta.modules))
-    _check_ids(backup.collections)
+    _check_ids(payload["collections"])
     _check_rows(backup.collections)
 
     db = ctx.db

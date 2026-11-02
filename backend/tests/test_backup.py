@@ -171,8 +171,11 @@ def _demo_world_with_crm(api: ApiClient) -> dict[str, str]:
     api.ok("POST", f"{SERVICES}/{service}/confirm", {})
     api.ok("POST", f"{SERVICES}/{service}/deliver", {"artifact_ref": "v1"})
     ws = api.snapshot()
+    delivery = next(s for s in ws["services"] if s["id"] == service)["deliveries"][0]
     return {
         "product": next(p for p in ws["products"] if p["sku"] == "T-001")["id"],
+        "delivery": delivery["id"],
+        "delivery_digest": delivery["digest"],
         "buyer": _wallet(ws, "buyer")["id"],
         "order": ws["orders"][0]["id"],
         "case": case,
@@ -248,6 +251,7 @@ def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> No
     own = other.snapshot()
     own_buyer = _wallet(own, "buyer")["id"]
     own_product = own["products"][0]["id"]
+    own_service = own["services"][0]["id"]
 
     order_body = {
         "buyer_wallet_id": own_buyer,
@@ -277,6 +281,13 @@ def test_ids_from_other_workspace_are_missing(api: ApiClient, make_client) -> No
         ("POST", f"{QUOTES}/{ids['quote']}/issue", {}, "record_missing"),
         # services.get_service
         ("POST", f"{SERVICES}/{ids['service']}/confirm", {}, "simulation_record_missing"),
+        # services._review 的交付查詢：自己的服務帶其他工作區的 delivery_id
+        (
+            "POST",
+            f"{SERVICES}/{own_service}/accept",
+            {"delivery_id": ids["delivery"], "digest": ids["delivery_digest"]},
+            "simulation_record_missing",
+        ),
         # manufacturing 的商品、BOM、工單
         ("POST", BOMS, bom_body, "record_missing"),
         ("POST", WORK_ORDERS, {"bom_id": ids["bom"], "quantity": 1}, "record_missing"),
@@ -317,8 +328,7 @@ def test_import_tampered_ledger_keeps_existing(api: ApiClient) -> None:
     entries = tampered["collections"]["ledger"][0]["entries"]
     entries[0]["amount_minor"] -= 1
     entries[1]["amount_minor"] += 1
-    status, _code = _error(_import(api, tampered))
-    assert status == 422
+    assert _error(_import(api, tampered)) == (422, "ledger_balance_invalid")
     assert api.snapshot() == before
 
 
@@ -402,8 +412,8 @@ def test_import_rejections_keep_existing(
 ) -> None:
     _demo_world(api)
     backup = _export(api)
-    if name in ("case_mismatch", "legal") and not backup["collections"]["services"]:
-        pytest.skip("範本沒有服務資料")
+    # _demo_world 用 general 範本，一定有示範服務，服務相關的竄改案例才有意義
+    assert backup["collections"]["services"]
     before = api.snapshot()
     bad = copy.deepcopy(backup)
     mutate(bad)
@@ -648,3 +658,72 @@ def test_launch_kit_default_modules_and_quoting(api: ApiClient) -> None:
 )
 def test_launch_kit_rejects_invalid(api: ApiClient, params: dict[str, str], code: str) -> None:
     assert _error(_kit(api, **params)) == (422, code)
+
+
+# --- 識別碼在整份備份中唯一（B§2）：業務與行政資料共用同一個集合 ------------------------
+
+
+def _with_admin(api: ApiClient) -> dict[str, Any]:
+    _demo_world(api)
+    backup = _export(api)
+    assert backup["collections"]["administration"]["units"]
+    return backup
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        # 行政資料列沿用業務資料的 id（大小寫不同也算重複）
+        lambda c: c["administration"]["units"][0].__setitem__("id", c["products"][0]["id"].upper()),
+        # 行政更正紀錄沿用巢狀業務資料（訂單品項）的 id
+        lambda c: c["administration"]["changes"][0].__setitem__(
+            "id", c["orders"][0]["lines"][0]["id"]
+        ),
+        # 業務資料沿用行政資料的 id
+        lambda c: c["customers"][0].__setitem__("id", c["administration"]["staff"][0]["id"]),
+        # 行政資料彼此重複
+        lambda c: c["administration"]["notices"][0].__setitem__(
+            "id", c["administration"]["units"][0]["id"]
+        ),
+        # 業務資料與 history 重複
+        lambda c: c["history"][0].__setitem__("id", c["wallets"][0]["id"]),
+    ],
+    ids=[
+        "admin_reuses_business",
+        "change_reuses_line",
+        "business_reuses_admin",
+        "admin_dup",
+        "history",
+    ],
+)
+def test_import_ids_unique_across_business_and_admin(api: ApiClient, mutate: Any) -> None:
+    backup = _with_admin(api)
+    assert backup["collections"]["administration"]["changes"]
+    before = api.snapshot()
+    bad = copy.deepcopy(backup)
+    mutate(bad["collections"])
+    assert _error(_import(api, bad)) == (422, "id_collision")
+    assert api.snapshot() == before
+
+
+def test_record_ids_walks_declared_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """各模組以 ModuleSpec.id_paths 宣告資料列位置；共用的走訪器收集所有 id。"""
+    from src.platform import registry
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    registry.register(
+        registry.ModuleSpec(
+            "a",
+            lambda _d, _w: {},
+            lambda _d, _w, _x: None,
+            id_paths=("rows", "rows.items", "nested.list"),
+        )
+    )
+    collections = {
+        "rows": [{"id": "r1", "items": [{"id": "i1"}, {"id": "i2"}]}, {"id": "r2", "items": []}],
+        "nested": {"list": [{"id": "n1"}, "not-a-row"]},
+        "ignored": [{"id": "x"}],
+    }
+    assert sorted(registry.record_ids(collections)) == ["i1", "i2", "n1", "r1", "r2"]
+    # 缺少的鍵或型別不符時略過，交給各模組的結構檢查回正式錯誤碼
+    assert list(registry.record_ids({"rows": "bad", "nested": None})) == []

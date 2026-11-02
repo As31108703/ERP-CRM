@@ -1,6 +1,6 @@
 """模組登錄：各業務模組在自己的 Task 註冊快照、還原與一致性檢查。"""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +35,9 @@ class ModuleSpec:
     restore: Callable[[Session, str, dict[str, Any]], None]
     # 依 SPEC_ORDER 執行的模組自身檢查
     invariants: tuple[Check, ...] = ()
+    # 快照中以 id 識別的資料列位置，以點分隔（例如 "orders.lines"）；匯入時由 record_ids
+    # 收集所有模組的 id，在同一個集合中檢查是否重複（B§2 id_collision）
+    id_paths: tuple[str, ...] = ()
 
 
 # 快照、一致性檢查與還原的固定執行順序，與模組匯入或登錄的先後無關：
@@ -85,3 +88,29 @@ def final_invariants() -> list[Check]:
     rank = {name: i for i, name in enumerate(FINAL_ORDER)}
     names = sorted(_FINALS, key=lambda n: rank.get(n, len(FINAL_ORDER)))
     return [_FINALS[n] for n in names]
+
+
+def _children(nodes: Iterable[Any], key: str) -> Iterator[Any]:
+    for node in nodes:
+        child = node.get(key) if isinstance(node, dict) else None
+        if isinstance(child, list):
+            yield from child
+        elif isinstance(child, dict):
+            yield child
+
+
+def ids_at(collections: dict[str, Any], path: str) -> Iterator[Any]:
+    """`path` 指到的每一筆資料列的 id；鍵不存在或型別不符時略過（結構錯誤由各模組檢查）。"""
+    nodes: list[Any] = [collections]
+    for key in path.split("."):
+        nodes = list(_children(nodes, key))
+    for node in nodes:
+        if isinstance(node, dict) and "id" in node:
+            yield node["id"]
+
+
+def record_ids(collections: dict[str, Any]) -> Iterator[Any]:
+    """依 SPEC_ORDER 收集所有模組宣告（ModuleSpec.id_paths）的資料列 id。"""
+    for spec in all_specs():
+        for path in spec.id_paths:
+            yield from ids_at(collections, path)
