@@ -11,7 +11,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import datetime
-from typing import Any, NoReturn, TypedDict
+from typing import Any, NoReturn, TypedDict, TypeVar
 
 from fastapi import Request
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -35,6 +35,7 @@ _VERSION_RE = re.compile(r"[0-9]+", re.ASCII)
 _VERSION_MAX_DIGITS = 18
 
 Handler = Callable[[CommandContext, dict[str, Any]], str | None]
+T = TypeVar("T")
 
 
 class MutationResponse(TypedDict):
@@ -169,7 +170,69 @@ def _parse_json(raw: bytes) -> Any:
         _json_invalid()
 
 
+def check_origin_csrf(request: Request, settings: Settings, row: WorkspaceSessionRow) -> None:
+    """寫入請求的 Origin 與 CSRF 檢查（命令管線第 4–5 步，偏好寫入共用）。"""
+    ensure(_origin_ok(request, settings), 403, "origin_invalid", "拒絕跨來源寫入")
+    csrf = request.headers.get("x-csrf-token", "")
+    ensure(
+        hmac.compare_digest(csrf.encode("utf-8"), row.csrf.encode("utf-8")),
+        403,
+        "csrf_invalid",
+        "工作區驗證失敗",
+    )
+
+
+def parse_body(raw: bytes, body_limit: int = BODY_LIMIT) -> dict[str, Any]:
+    """body 大小與 JSON 物件檢查（命令管線第 8–9 步）。"""
+    ensure(len(raw) <= body_limit, 413, "body_limit", "請求太大")
+    body = _parse_json(raw)
+    ensure(isinstance(body, dict), 422, "payload_invalid", "參數不符")
+    return body
+
+
 class CommandPipeline:
+    def preference(
+        self,
+        request: Request,
+        raw: bytes,
+        *,
+        handler: Callable[[CommandContext, dict[str, Any]], T],
+        body_limit: int = BODY_LIMIT,
+    ) -> T:
+        """不影響業務資料的偏好寫入（例如教學畫面設定）：同樣鎖住 session 列、計入速率限制，
+        並檢查 Origin、CSRF 與 body，但不需要 Idempotency-Key 與 If-Match-Version，
+        也不增加版本號、不寫 history 與收據。handler 失敗時只回滾 SAVEPOINT。"""
+        settings = _settings(request)
+        token = session_token(request)
+        with Session(request.app.state.engine, expire_on_commit=False) as db:
+            try:
+                row = lock_session(db, token, clock.utcnow())
+                now = session_now(row)
+                ratelimit.hit(row, now)
+                db.flush()
+            except BaseException:
+                db.rollback()
+                raise
+
+            savepoint = db.begin_nested()
+            try:
+                check_origin_csrf(request, settings, row)
+                body = parse_body(raw, body_limit)
+                workspace = load_workspace(db, row.id)
+                ensure(workspace is not None, 409, "workspace_missing", "請先建立工作區")
+                ctx = CommandContext(
+                    db=db, session_row=row, workspace=workspace, now=now, settings=settings
+                )
+                out = handler(ctx, body)
+                db.flush()
+                savepoint.commit()
+            except BaseException:
+                savepoint.rollback()
+                db.commit()
+                raise
+            db.commit()
+            return out
+
     def mutate(
         self,
         request: Request,
@@ -242,16 +305,8 @@ class CommandPipeline:
         bypass_receipt_cap: bool,
     ) -> MutationResponse:
         headers = request.headers
-        # 4：Origin
-        ensure(_origin_ok(request, settings), 403, "origin_invalid", "拒絕跨來源寫入")
-        # 5：CSRF（定時比較）
-        csrf = headers.get("x-csrf-token", "")
-        ensure(
-            hmac.compare_digest(csrf.encode("utf-8"), row.csrf.encode("utf-8")),
-            403,
-            "csrf_invalid",
-            "工作區驗證失敗",
-        )
+        # 4–5：Origin 與 CSRF
+        check_origin_csrf(request, settings, row)
         # 6：Idempotency-Key
         key = headers.get("idempotency-key", "")
         ensure(_KEY_RE.fullmatch(key) is not None, 422, "key_required", "請提供操作識別")
@@ -261,9 +316,7 @@ class CommandPipeline:
             _VERSION_RE.fullmatch(expected) is not None, 428, "version_required", "請提供工作區版本"
         )
         # 8–9：body 大小與 JSON
-        ensure(len(raw) <= body_limit, 413, "body_limit", "請求太大")
-        body = _parse_json(raw)
-        ensure(isinstance(body, dict), 422, "payload_invalid", "參數不符")
+        body = parse_body(raw, body_limit)
         # 10：請求摘要綁定路徑、body 與預期版本字串
         request_hash = digest({"path": request.url.path, "body": body, "expected": expected})
         # 11：重播（必須在版本比對之前：前端重送時帶的是原本的版本號）
