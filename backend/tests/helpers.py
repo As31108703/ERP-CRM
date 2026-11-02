@@ -14,6 +14,9 @@ from src.platform.context import CommandContext, WorkspaceRow, WorkspaceSessionR
 # conftest 只在測試時註冊的路由：回傳目前 session 的 csrf 與版本號
 TEST_STATE_PATH = "/api/v1/_test/csrf"
 VIEW_PATH = "/api/v1/workspace/view"
+PRODUCTS = "/api/v1/inventory/products"
+ORDERS = "/api/v1/sales/orders"
+PRICE = 900
 
 
 def new_key() -> str:
@@ -104,3 +107,52 @@ def workspace_ctx(db: Session, settings: Settings) -> CommandContext:
     return CommandContext(
         db=db, session_row=session_row, workspace=workspace, now=clock.utcnow(), settings=settings
     )
+
+
+# --- 銷售流程輔助（test_sales、test_reports 共用） ------------------------------------
+
+
+def wallet_of(ws: dict[str, Any], kind: str) -> dict[str, Any]:
+    return next(w for w in ws["wallets"] if w["kind"] == kind)
+
+
+def fund(api: ApiClient, wallet_id: str, amount: int) -> None:
+    api.ok("POST", f"/api/v1/wallets/{wallet_id}/fund", {"amount_minor": amount})
+
+
+def buyer_wallet(api: ApiClient) -> str:
+    return wallet_of(api.snapshot(), "buyer")["id"]
+
+
+def stocked_product(api: ApiClient, batches: list[tuple[int, int]], price: int = PRICE) -> str:
+    """建立商品並依序以 (數量, 成本) 分批入庫。"""
+    business = wallet_of(api.snapshot(), "business")["id"]
+    fund(api, business, sum(q * c for q, c in batches) or 1)
+    first_cost = batches[0][1] if batches else 0
+    pid = api.ok(
+        "POST",
+        PRODUCTS,
+        {"name": "測試商品", "sku": "T-001", "price_minor": price, "cost_minor": first_cost},
+    )["result"]
+    for quantity, cost in batches:
+        api.ok("PATCH", f"{PRODUCTS}/{pid}", {"cost_minor": cost})
+        api.ok("POST", f"{PRODUCTS}/{pid}/receive", {"quantity": quantity})
+    return pid
+
+
+def create_order(api: ApiClient, buyer: str, lines: list[tuple[str, int]], **extra: Any) -> str:
+    body = {
+        "buyer_wallet_id": buyer,
+        "lines": [{"product_id": pid, "quantity": q} for pid, q in lines],
+        **extra,
+    }
+    return api.ok("POST", ORDERS, body)["result"]
+
+
+def line_ids(api: ApiClient, order_id: str) -> list[str]:
+    order = next(o for o in api.snapshot()["orders"] if o["id"] == order_id)
+    return [line["id"] for line in order["lines"]]
+
+
+def ship_body(lines: list[tuple[str, int]]) -> dict[str, Any]:
+    return {"lines": [{"line_id": lid, "quantity": q} for lid, q in lines]}

@@ -13,11 +13,20 @@ from src.config.settings import Settings
 from src.modules.inventory import service as inventory
 from src.modules.sales import service as sales
 from src.modules.sales.router import SPEC as SALES_SPEC
-from tests.helpers import ApiClient, workspace_ctx
+from tests.helpers import (
+    ORDERS,
+    PRICE,
+    ApiClient,
+    buyer_wallet,
+    create_order,
+    fund,
+    line_ids,
+    ship_body,
+    stocked_product,
+    workspace_ctx,
+)
 
 PRODUCTS = "/api/v1/inventory/products"
-ORDERS = "/api/v1/sales/orders"
-PRICE = 900
 
 
 def _error(r) -> tuple[int, str]:
@@ -44,55 +53,14 @@ def _lots(p: dict[str, Any]) -> list[tuple[int, int]]:
     return [(lot["quantity"], lot["cost_minor"]) for lot in p["lots"]]
 
 
-def _fund(api: ApiClient, wallet_id: str, amount: int) -> None:
-    api.ok("POST", f"/api/v1/wallets/{wallet_id}/fund", {"amount_minor": amount})
-
-
-def _buyer(api: ApiClient) -> str:
-    return _wallet(api.snapshot(), "buyer")["id"]
-
-
-def _stocked_product(api: ApiClient, batches: list[tuple[int, int]], price: int = PRICE) -> str:
-    """建立商品並依序以 (數量, 成本) 分批入庫。"""
-    business = _wallet(api.snapshot(), "business")["id"]
-    _fund(api, business, sum(q * c for q, c in batches) or 1)
-    first_cost = batches[0][1] if batches else 0
-    pid = api.ok(
-        "POST",
-        PRODUCTS,
-        {"name": "測試商品", "sku": "T-001", "price_minor": price, "cost_minor": first_cost},
-    )["result"]
-    for quantity, cost in batches:
-        api.ok("PATCH", f"{PRODUCTS}/{pid}", {"cost_minor": cost})
-        api.ok("POST", f"{PRODUCTS}/{pid}/receive", {"quantity": quantity})
-    return pid
-
-
-def _create_order(api: ApiClient, buyer: str, lines: list[tuple[str, int]], **extra: Any) -> str:
-    body = {
-        "buyer_wallet_id": buyer,
-        "lines": [{"product_id": pid, "quantity": q} for pid, q in lines],
-        **extra,
-    }
-    return api.ok("POST", ORDERS, body)["result"]
-
-
-def _line_ids(api: ApiClient, order_id: str) -> list[str]:
-    return [line["id"] for line in _order(api.snapshot(), order_id)["lines"]]
-
-
-def _ship_body(lines: list[tuple[str, int]]) -> dict[str, Any]:
-    return {"lines": [{"line_id": lid, "quantity": q} for lid, q in lines]}
-
-
 # --- 主流程 -----------------------------------------------------------------------
 
 
 def test_create_reserves_and_snapshots_line(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    buyer = _buyer(api)
-    oid = _create_order(api, buyer, [(pid, 3)], learning_run_id="run-abcdef01")
+    pid = stocked_product(api, [(5, 100)])
+    buyer = buyer_wallet(api)
+    oid = create_order(api, buyer, [(pid, 3)], learning_run_id="run-abcdef01")
     ws = api.snapshot()
     assert _product(ws, pid)["reserved"] == 3
     order = _order(ws, oid)
@@ -133,13 +101,13 @@ def test_create_reserves_and_snapshots_line(api: ApiClient) -> None:
 
 def test_full_flow_fifo_cost(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(2, 100), (2, 200)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 3 * PRICE)
-    oid = _create_order(api, buyer, [(pid, 3)])
+    pid = stocked_product(api, [(2, 100), (2, 200)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 3 * PRICE)
+    oid = create_order(api, buyer, [(pid, 3)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 3 * PRICE})
-    [lid] = _line_ids(api, oid)
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 3)]))
+    [lid] = line_ids(api, oid)
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 3)]))
     ws = api.snapshot()
     order = _order(ws, oid)
     assert order["status"] == "shipped"
@@ -170,10 +138,10 @@ def test_full_flow_fifo_cost(api: ApiClient) -> None:
 
 def test_partial_pay_status(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 10_000)
-    oid = _create_order(api, buyer, [(pid, 2)])
+    pid = stocked_product(api, [(5, 100)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 10_000)
+    oid = create_order(api, buyer, [(pid, 2)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 500})
     order = _order(api.snapshot(), oid)
     assert (order["status"], order["paid_minor"]) == ("partially_paid", 500)
@@ -184,31 +152,31 @@ def test_partial_pay_status(api: ApiClient) -> None:
 
 def test_ship_requires_full_payment_409_simulation_payment_required(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 10_000)
-    oid = _create_order(api, buyer, [(pid, 2)])
+    pid = stocked_product(api, [(5, 100)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 10_000)
+    oid = create_order(api, buyer, [(pid, 2)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 1})
-    [lid] = _line_ids(api, oid)
+    [lid] = line_ids(api, oid)
     before = api.snapshot()
-    r = api.mutate("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 1)]))
+    r = api.mutate("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 1)]))
     assert _error(r) == (409, "simulation_payment_required")
     assert api.snapshot() == before
 
 
 def test_partial_ship_then_rest(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 3 * PRICE)
-    oid = _create_order(api, buyer, [(pid, 3)])
+    pid = stocked_product(api, [(5, 100)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 3 * PRICE)
+    oid = create_order(api, buyer, [(pid, 3)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 3 * PRICE})
-    [lid] = _line_ids(api, oid)
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 1)]))
+    [lid] = line_ids(api, oid)
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 1)]))
     ws = api.snapshot()
     assert _order(ws, oid)["status"] == "partially_shipped"
     assert _product(ws, pid)["reserved"] == 2
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 2)]))
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 2)]))
     ws = api.snapshot()
     assert _order(ws, oid)["status"] == "shipped"
     assert [
@@ -218,14 +186,14 @@ def test_partial_ship_then_rest(api: ApiClient) -> None:
 
 def test_return_restocks_to_queue_tail(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(2, 100), (2, 200)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 3 * PRICE)
-    oid = _create_order(api, buyer, [(pid, 3)])
+    pid = stocked_product(api, [(2, 100), (2, 200)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 3 * PRICE)
+    oid = create_order(api, buyer, [(pid, 3)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 3 * PRICE})
-    [lid] = _line_ids(api, oid)
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 3)]))
-    api.ok("POST", f"{ORDERS}/{oid}/return", _ship_body([(lid, 1)]))
+    [lid] = line_ids(api, oid)
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 3)]))
+    api.ok("POST", f"{ORDERS}/{oid}/return", ship_body([(lid, 1)]))
     ws = api.snapshot()
     p = _product(ws, pid)
     assert _lots(p) == [(1, 200), (1, 100)]
@@ -242,7 +210,7 @@ def test_return_restocks_to_queue_tail(api: ApiClient) -> None:
     refund = ws["ledger"][-1]
     assert (refund["kind"], refund["reference_id"]) == ("order.return", oid)
     # 全部退完：status returned，退回的成本層依序接在尾端
-    api.ok("POST", f"{ORDERS}/{oid}/return", _ship_body([(lid, 2)]))
+    api.ok("POST", f"{ORDERS}/{oid}/return", ship_body([(lid, 2)]))
     ws = api.snapshot()
     assert _order(ws, oid)["status"] == "returned"
     assert _order(ws, oid)["refunded_minor"] == 3 * PRICE
@@ -251,15 +219,15 @@ def test_return_restocks_to_queue_tail(api: ApiClient) -> None:
 
 def test_ship_after_partial_return_allowed(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(4, 100)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 3 * PRICE)
-    oid = _create_order(api, buyer, [(pid, 3)])
+    pid = stocked_product(api, [(4, 100)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 3 * PRICE)
+    oid = create_order(api, buyer, [(pid, 3)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 3 * PRICE})
-    [lid] = _line_ids(api, oid)
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 2)]))
-    api.ok("POST", f"{ORDERS}/{oid}/return", _ship_body([(lid, 1)]))
-    api.ok("POST", f"{ORDERS}/{oid}/ship", _ship_body([(lid, 1)]))
+    [lid] = line_ids(api, oid)
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 2)]))
+    api.ok("POST", f"{ORDERS}/{oid}/return", ship_body([(lid, 1)]))
+    api.ok("POST", f"{ORDERS}/{oid}/ship", ship_body([(lid, 1)]))
     order = _order(api.snapshot(), oid)
     assert order["status"] == "shipped"
     assert (order["lines"][0]["shipped_quantity"], order["lines"][0]["returned_quantity"]) == (3, 1)
@@ -267,10 +235,10 @@ def test_ship_after_partial_return_allowed(api: ApiClient) -> None:
 
 def test_cancel_refunds_and_releases(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    buyer = _buyer(api)
-    _fund(api, buyer, 10_000)
-    oid = _create_order(api, buyer, [(pid, 2)])
+    pid = stocked_product(api, [(5, 100)])
+    buyer = buyer_wallet(api)
+    fund(api, buyer, 10_000)
+    oid = create_order(api, buyer, [(pid, 2)])
     api.ok("POST", f"{ORDERS}/{oid}/pay", {"amount_minor": 700})
     api.ok("POST", f"{ORDERS}/{oid}/cancel", {})
     ws = api.snapshot()
@@ -288,8 +256,8 @@ def test_cancel_refunds_and_releases(api: ApiClient) -> None:
 
 def test_cancel_unpaid_writes_zero_ledger(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(5, 100)])
-    oid = _create_order(api, _buyer(api), [(pid, 2)])
+    pid = stocked_product(api, [(5, 100)])
+    oid = create_order(api, buyer_wallet(api), [(pid, 2)])
     api.ok("POST", f"{ORDERS}/{oid}/cancel", {})
     ws = api.snapshot()
     cancel = ws["ledger"][-1]
@@ -302,9 +270,9 @@ def test_cancel_unpaid_writes_zero_ledger(api: ApiClient) -> None:
 
 def test_out_of_stock_409(api: ApiClient) -> None:
     api.setup()
-    pid = _stocked_product(api, [(3, 100)])
-    buyer = _buyer(api)
-    _create_order(api, buyer, [(pid, 2)])
+    pid = stocked_product(api, [(3, 100)])
+    buyer = buyer_wallet(api)
+    create_order(api, buyer, [(pid, 2)])
     before = api.snapshot()
     r = api.mutate(
         "POST", ORDERS, {"buyer_wallet_id": buyer, "lines": [{"product_id": pid, "quantity": 2}]}
@@ -316,7 +284,7 @@ def test_out_of_stock_409(api: ApiClient) -> None:
 def test_sales_module_disabled(api: ApiClient) -> None:
     api.setup("retail", modules=["inventory", "wallets"])
     before = api.snapshot()
-    r = api.mutate("POST", ORDERS, {"buyer_wallet_id": _buyer(api), "lines": []})
+    r = api.mutate("POST", ORDERS, {"buyer_wallet_id": buyer_wallet(api), "lines": []})
     assert _error(r) == (403, "module_disabled")
     assert api.snapshot() == before
 
@@ -330,12 +298,12 @@ class Scenario:
 
     def __init__(self, api: ApiClient) -> None:
         api.setup()
-        self.pid = _stocked_product(api, [(5, 100)])
+        self.pid = stocked_product(api, [(5, 100)])
         ws = api.snapshot()
         business = _wallet(ws, "business")["id"]
         self.business = business
         self.buyer = _wallet(ws, "buyer")["id"]
-        _fund(api, self.buyer, 4 * PRICE)
+        fund(api, self.buyer, 4 * PRICE)
         self.qid = api.ok(
             "POST",
             PRODUCTS,
@@ -343,15 +311,15 @@ class Scenario:
         )["result"]
         api.ok("POST", f"{PRODUCTS}/{self.qid}/receive", {"quantity": 1})
         api.ok("PATCH", f"{PRODUCTS}/{self.qid}", {"active": False})
-        self.a = _create_order(api, self.buyer, [(self.pid, 1)])
-        self.b = _create_order(api, self.buyer, [(self.pid, 2)])
+        self.a = create_order(api, self.buyer, [(self.pid, 1)])
+        self.b = create_order(api, self.buyer, [(self.pid, 2)])
         api.ok("POST", f"{ORDERS}/{self.b}/pay", {"amount_minor": 2 * PRICE})
-        [self.b_line] = _line_ids(api, self.b)
-        api.ok("POST", f"{ORDERS}/{self.b}/ship", _ship_body([(self.b_line, 1)]))
-        self.c = _create_order(api, self.buyer, [(self.pid, 1)])
+        [self.b_line] = line_ids(api, self.b)
+        api.ok("POST", f"{ORDERS}/{self.b}/ship", ship_body([(self.b_line, 1)]))
+        self.c = create_order(api, self.buyer, [(self.pid, 1)])
         api.ok("POST", f"{ORDERS}/{self.c}/cancel", {})
-        [self.a_line] = _line_ids(api, self.a)
-        [self.c_line] = _line_ids(api, self.c)
+        [self.a_line] = line_ids(api, self.a)
+        [self.c_line] = line_ids(api, self.c)
 
 
 def _create(s: Scenario, **overrides: Any) -> tuple[str, dict[str, Any]]:
@@ -467,14 +435,14 @@ _CASES: list[Case] = [
     (
         "ship_cancelled",
         None,
-        lambda s: _act(s.c, "ship", _ship_body([(s.c_line, 1)])),
+        lambda s: _act(s.c, "ship", ship_body([(s.c_line, 1)])),
         409,
         "simulation_order_cancelled",
     ),
     (
         "return_cancelled",
         None,
-        lambda s: _act(s.c, "return", _ship_body([(s.c_line, 1)])),
+        lambda s: _act(s.c, "return", ship_body([(s.c_line, 1)])),
         409,
         "simulation_order_cancelled",
     ),
@@ -515,35 +483,35 @@ _CASES: list[Case] = [
     (
         "ship_unpaid",
         None,
-        lambda s: _act(s.a, "ship", _ship_body([(s.a_line, 1)])),
+        lambda s: _act(s.a, "ship", ship_body([(s.a_line, 1)])),
         409,
         "simulation_payment_required",
     ),
     (
         "ship_duplicate",
         None,
-        lambda s: _act(s.b, "ship", _ship_body([(s.b_line, 1), (s.b_line, 1)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.b_line, 1), (s.b_line, 1)])),
         422,
         "simulation_duplicate_line",
     ),
     (
         "ship_line_missing",
         None,
-        lambda s: _act(s.b, "ship", _ship_body([(str(uuid.uuid4()), 1)])),
+        lambda s: _act(s.b, "ship", ship_body([(str(uuid.uuid4()), 1)])),
         404,
         "simulation_record_missing",
     ),
     (
         "ship_other_order_line",
         None,
-        lambda s: _act(s.b, "ship", _ship_body([(s.a_line, 1)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.a_line, 1)])),
         404,
         "simulation_record_missing",
     ),
     (
         "ship_overship",
         None,
-        lambda s: _act(s.b, "ship", _ship_body([(s.b_line, 2)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.b_line, 2)])),
         409,
         "simulation_overship",
     ),
@@ -551,21 +519,21 @@ _CASES: list[Case] = [
     (
         "ship_quantity_zero",
         None,
-        lambda s: _act(s.b, "ship", _ship_body([(s.b_line, 0)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.b_line, 0)])),
         422,
         "number_invalid",
     ),
     (
         "ship_out_of_stock",
         "UPDATE product SET reserved = 0 WHERE sku = 'T-001'",
-        lambda s: _act(s.b, "ship", _ship_body([(s.b_line, 1)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.b_line, 1)])),
         409,
         "simulation_out_of_stock",
     ),
     (
         "ship_lots_corrupt",
         "DELETE FROM product_lot",
-        lambda s: _act(s.b, "ship", _ship_body([(s.b_line, 1)])),
+        lambda s: _act(s.b, "ship", ship_body([(s.b_line, 1)])),
         409,
         "simulation_inventory_corrupt",
     ),
@@ -573,49 +541,49 @@ _CASES: list[Case] = [
     (
         "return_overreturn",
         None,
-        lambda s: _act(s.b, "return", _ship_body([(s.b_line, 2)])),
+        lambda s: _act(s.b, "return", ship_body([(s.b_line, 2)])),
         409,
         "simulation_overreturn",
     ),
     (
         "return_unshipped",
         None,
-        lambda s: _act(s.a, "return", _ship_body([(s.a_line, 1)])),
+        lambda s: _act(s.a, "return", ship_body([(s.a_line, 1)])),
         409,
         "simulation_overreturn",
     ),
     (
         "return_duplicate",
         None,
-        lambda s: _act(s.b, "return", _ship_body([(s.b_line, 1), (s.b_line, 1)])),
+        lambda s: _act(s.b, "return", ship_body([(s.b_line, 1), (s.b_line, 1)])),
         422,
         "simulation_duplicate_line",
     ),
     (
         "return_line_missing",
         None,
-        lambda s: _act(s.b, "return", _ship_body([(str(uuid.uuid4()), 1)])),
+        lambda s: _act(s.b, "return", ship_body([(str(uuid.uuid4()), 1)])),
         404,
         "simulation_record_missing",
     ),
     (
         "return_overrefund",
         "UPDATE sales_order SET refunded_minor = paid_minor WHERE status = 'partially_shipped'",
-        lambda s: _act(s.b, "return", _ship_body([(s.b_line, 1)])),
+        lambda s: _act(s.b, "return", ship_body([(s.b_line, 1)])),
         409,
         "simulation_overrefund",
     ),
     (
         "return_lots_corrupt",
         "UPDATE shipped_cost_lot SET returned = quantity",
-        lambda s: _act(s.b, "return", _ship_body([(s.b_line, 1)])),
+        lambda s: _act(s.b, "return", ship_body([(s.b_line, 1)])),
         409,
         "simulation_inventory_corrupt",
     ),
     (
         "return_business_insufficient",
         "UPDATE wallet SET balance_minor = 0 WHERE kind = 'business'",
-        lambda s: _act(s.b, "return", _ship_body([(s.b_line, 1)])),
+        lambda s: _act(s.b, "return", ship_body([(s.b_line, 1)])),
         409,
         "simulation_insufficient_funds",
     ),
@@ -740,7 +708,7 @@ def test_snapshot_restore_roundtrip(
     api: ApiClient, db_engine: Engine, test_settings: Settings
 ) -> None:
     s = Scenario(api)
-    api.ok("POST", f"{ORDERS}/{s.b}/return", _ship_body([(s.b_line, 1)]))
+    api.ok("POST", f"{ORDERS}/{s.b}/return", ship_body([(s.b_line, 1)]))
     with Session(db_engine) as db:
         ctx = workspace_ctx(db, test_settings)
         before = SALES_SPEC.snapshot(db, ctx.workspace_id)
