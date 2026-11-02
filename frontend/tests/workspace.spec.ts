@@ -73,6 +73,43 @@ describe("workspace store", () => {
     expect(store.error).toBe("伺服器發生錯誤");
   });
 
+  it("a workbench failure still applies the view and session", async () => {
+    let bumped = false;
+    const seen = routeFetch({
+      "GET /api/v1/workspace/view": () => json(200, bumped ? { ...VIEW_WS, version: 4, csrf: "c2" } : VIEW_WS),
+      "GET /api/v1/workbench": () => json(500, { error: { code: "internal_error", message: "伺服器發生錯誤" } }),
+      "POST /api/v1/crm/customers": () => ((bumped = true), json(200, { result: "c1" })),
+    });
+    const store = await freshStore();
+    await store.refresh();
+    expect(store.view?.version).toBe(3);
+    expect(store.workbench).toBeNull();
+    expect(store.error).toBe("伺服器發生錯誤");
+    await store.run("POST", "/api/v1/crm/customers", { name: "甲" });
+    expect(store.view?.version).toBe(4);
+    const { getSession } = await import("../src/api/client");
+    expect(getSession()).toEqual({ csrf: "c2", version: 4 });
+    expect(seen).toContain("POST /api/v1/crm/customers");
+  });
+
+  it("first load without a workspace skips workbench and allows setup", async () => {
+    const seen = routeFetch({
+      "GET /api/v1/workspace/view": () => json(200, VIEW_EMPTY),
+      "GET /api/templates": () => json(500, { error: { code: "internal_error", message: "範本讀取失敗" } }),
+      "POST /api/v1/workspace/setup": () => json(200, { result: "g1" }),
+    });
+    const store = await freshStore();
+    await store.ready();
+    expect(seen).not.toContain("GET /api/v1/workbench");
+    expect(store.view?.csrf).toBe("c1");
+    const out = await store.run("POST", "/api/v1/workspace/setup", { industry: "general", company_name: "甲" });
+    expect(out).toEqual({ result: "g1" });
+    const post = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.find(
+      ([u]) => u === "/api/v1/workspace/setup",
+    )!;
+    expect(new Headers(post[1].headers).get("x-csrf-token")).toBe("c1");
+  });
+
   it("run refreshes after success and shows a message", async () => {
     let views = 0;
     routeFetch({

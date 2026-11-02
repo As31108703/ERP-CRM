@@ -37,8 +37,9 @@ services:
     ports:
       - 8000:8000
 
+  # 前端只是 nginx 靜態檔與反向代理，不需要 .env（避免把資料庫帳密帶進容器）
   frontend:
-    <<: *default
+    restart: always
     build:
       context: ./frontend
     depends_on:

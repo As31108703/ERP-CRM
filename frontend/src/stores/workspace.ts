@@ -47,20 +47,37 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
   let firstLoad: Promise<void> | null = null;
 
+  /**
+   * view 是寫入所需的 csrf／版本號來源，必須獨立套用：templates 或 workbench 失敗時
+   * 只記錄錯誤，不得丟棄 view。沒有工作區時不讀 workbench。
+   */
   async function refresh(): Promise<void> {
+    const failures: unknown[] = [];
     try {
-      const [v, t, w] = await Promise.all([
+      const [v, t] = await Promise.allSettled([
         optional<WorkspaceView>(API.view),
         optional<TemplatesResponse>(API.templates),
-        optional<Workbench>(API.workbench),
       ]);
-      view.value = v;
-      templates.value = t;
-      workbench.value = v?.workspace ? w : null;
-      if (v) setSession({ csrf: v.csrf, version: v.version });
-      error.value = "";
-    } catch (err) {
-      error.value = messageOf(err);
+      if (v.status === "fulfilled") {
+        view.value = v.value;
+        if (v.value) setSession({ csrf: v.value.csrf, version: v.value.version });
+      } else {
+        failures.push(v.reason);
+      }
+      if (t.status === "fulfilled") templates.value = t.value;
+      else failures.push(t.reason);
+
+      if (view.value?.workspace) {
+        try {
+          workbench.value = await optional<Workbench>(API.workbench);
+        } catch (err) {
+          workbench.value = null;
+          failures.push(err);
+        }
+      } else {
+        workbench.value = null;
+      }
+      error.value = failures.length ? messageOf(failures[0]) : "";
     } finally {
       pending.value = readPending();
       loaded.value = true;
