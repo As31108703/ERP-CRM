@@ -565,6 +565,37 @@ def test_restore_validates_change_chain(api: ApiClient, db_engine: Engine) -> No
     assert tampered(overlap) == "office_time_conflict"
 
 
+@pytest.mark.parametrize("side", ["before", "after"])
+@pytest.mark.parametrize("kind", ["shift.update", "reservation.update"])
+def test_tampered_change_missing_status_422(
+    api: ApiClient, db_engine: Engine, side: str, kind: str
+) -> None:
+    """資料庫中的更正紀錄缺少前置條件要讀的欄位：下一個命令回 422 office_change_invalid，
+    而不是 KeyError 造成的 500。"""
+    unit, staff = _base(api)
+    if kind == "shift.update":
+        shift = _shift(api, unit, staff, "2026-11-03", "09:00", "17:00")
+        api.ok(
+            "PATCH", f"{SHIFTS}/{shift}", {"reason": "改時間", "end_at": _t("2026-11-03", "18:00")}
+        )
+    else:
+        eq = _equipment(api, unit)
+        res = _reserve(api, eq, staff, "2026-11-04", "09:00", "10:00")
+        api.ok(
+            "PATCH",
+            f"{RESERVATIONS}/{res}",
+            {"reason": "延長", "end_at": _t("2026-11-04", "11:00")},
+        )
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(f"UPDATE adm_change SET {side} = {side} - 'status' WHERE kind = :k"), {"k": kind}
+        )
+    before = api.snapshot()
+    r = api.mutate("POST", UNITS, {"name": "新單位", "kind": "branch"})
+    assert (r.status_code, r.json()["error"]["code"]) == (422, "office_change_invalid"), r.text
+    assert api.snapshot() == before
+
+
 # --- 錯誤碼：每種失敗情境都不改變快照 ----------------------------------------------
 
 

@@ -351,7 +351,7 @@ _NOTICE_EDITABLE = ("title", "body", "unit_id", "pinned", "due_at", "updated_at"
 # kind → (前置條件, 允許不同的欄位, 前置條件不符時的訊息)
 _KIND_RULES: dict[str, tuple[Callable[[dict, dict], bool], tuple[str, ...], str]] = {
     "shift.update": (
-        lambda b, a: b["status"] == "scheduled" and a["status"] == "scheduled",
+        lambda b, a: b.get("status") == "scheduled" and a.get("status") == "scheduled",
         _SEGMENT_EDITABLE,
         "只有已排定班次可更正",
     ),
@@ -366,7 +366,7 @@ _KIND_RULES: dict[str, tuple[Callable[[dict, dict], bool], tuple[str, ...], str]
         "出勤作廢紀錄不符",
     ),
     "reservation.update": (
-        lambda b, a: b["status"] == "reserved" and a["status"] == "reserved",
+        lambda b, a: b.get("status") == "reserved" and a.get("status") == "reserved",
         ("start_at", "end_at", "purpose", "updated_at"),
         "只有借用中的預約可更正",
     ),
