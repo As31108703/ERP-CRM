@@ -85,7 +85,7 @@ def test_seed_crm(api: ApiClient, industry: str) -> None:
     }
     assert ws["contacts"] == []
     assert ws["quotes"] == []
-    assert ws["tasks"] == [] and ws["milestones"] == []
+    # 任務與里程碑由 projects 的 seed 建立（見 test_projects.py）
     assert len(ws["history"]) == 0
 
 
