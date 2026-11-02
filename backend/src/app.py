@@ -9,6 +9,7 @@ from src.middleware.errors import register_error_handlers
 from src.middleware.headers import SecurityHeadersMiddleware
 from src.middleware.session import SessionCookieMiddleware
 from src.modules.administration.router import router as administration_router
+from src.modules.backup.router import router as backup_router
 from src.modules.catalog.router import router as catalog_router
 from src.modules.crm.router import router as crm_router
 from src.modules.inventory.router import router as inventory_router
@@ -56,6 +57,7 @@ ROUTERS: list[APIRouter] = [
     administration_router,
     reports_router,
     workbench_router,
+    backup_router,
 ]
 
 
