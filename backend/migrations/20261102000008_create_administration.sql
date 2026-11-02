@@ -19,6 +19,8 @@ CREATE TABLE adm_unit (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_unit_workspace_idx ON adm_unit (workspace_id, seq);
+-- 複合外鍵的參照端索引：串聯刪除與延後的外鍵檢查不必掃整個工作區
+CREATE INDEX adm_unit_parent_idx ON adm_unit (workspace_id, parent_id);
 
 -- 假員工（虛構示範人物）
 CREATE TABLE adm_staff (
@@ -37,6 +39,7 @@ CREATE TABLE adm_staff (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_staff_workspace_idx ON adm_staff (workspace_id, seq);
+CREATE INDEX adm_staff_unit_idx ON adm_staff (workspace_id, unit_id);
 
 CREATE TABLE adm_shift (
     workspace_id UUID NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
@@ -58,6 +61,8 @@ CREATE TABLE adm_shift (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_shift_workspace_idx ON adm_shift (workspace_id, seq);
+CREATE INDEX adm_shift_staff_idx ON adm_shift (workspace_id, staff_id);
+CREATE INDEX adm_shift_unit_idx ON adm_shift (workspace_id, unit_id);
 
 -- 手動輸入的實際出勤（非打卡）
 CREATE TABLE adm_attendance (
@@ -80,6 +85,8 @@ CREATE TABLE adm_attendance (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_attendance_workspace_idx ON adm_attendance (workspace_id, seq);
+CREATE INDEX adm_attendance_staff_idx ON adm_attendance (workspace_id, staff_id);
+CREATE INDEX adm_attendance_unit_idx ON adm_attendance (workspace_id, unit_id);
 
 CREATE TABLE adm_request (
     workspace_id UUID NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
@@ -105,6 +112,8 @@ CREATE TABLE adm_request (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_request_workspace_idx ON adm_request (workspace_id, seq);
+CREATE INDEX adm_request_staff_idx ON adm_request (workspace_id, staff_id);
+CREATE INDEX adm_request_unit_idx ON adm_request (workspace_id, unit_id);
 
 -- 申請的狀態紀錄，依 seq 排序；隨申請串聯刪除
 CREATE TABLE adm_request_transition (
@@ -134,6 +143,7 @@ CREATE TABLE adm_equipment (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_equipment_workspace_idx ON adm_equipment (workspace_id, seq);
+CREATE INDEX adm_equipment_unit_idx ON adm_equipment (workspace_id, unit_id);
 
 CREATE TABLE adm_reservation (
     workspace_id UUID NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
@@ -154,6 +164,8 @@ CREATE TABLE adm_reservation (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_reservation_workspace_idx ON adm_reservation (workspace_id, seq);
+CREATE INDEX adm_reservation_equipment_idx ON adm_reservation (workspace_id, equipment_id);
+CREATE INDEX adm_reservation_staff_idx ON adm_reservation (workspace_id, staff_id);
 
 -- unit_id 為 NULL 表示全體
 CREATE TABLE adm_notice (
@@ -173,6 +185,7 @@ CREATE TABLE adm_notice (
         DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX adm_notice_workspace_idx ON adm_notice (workspace_id, seq);
+CREATE INDEX adm_notice_unit_idx ON adm_notice (workspace_id, unit_id);
 
 -- 更正與封存紀錄：before／after 為整列快照；record_id 依 kind 指向不同資料表，不設外鍵
 CREATE TABLE adm_change (

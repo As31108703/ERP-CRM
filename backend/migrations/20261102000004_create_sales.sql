@@ -21,6 +21,8 @@ CREATE TABLE sales_order (
 );
 
 CREATE INDEX sales_order_workspace_seq_idx ON sales_order (workspace_id, seq);
+-- 複合外鍵的參照端索引：串聯刪除與外鍵檢查不必掃整個工作區
+CREATE INDEX sales_order_buyer_wallet_idx ON sales_order (workspace_id, buyer_wallet_id);
 
 -- 訂單品項：name、price_minor、cost_minor 是下單當時的商品快照，idx 為品項順序
 CREATE TABLE order_line (
