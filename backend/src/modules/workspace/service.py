@@ -1,5 +1,7 @@
 """工作區：建立（含自動建立）、清除、快照與檢視。"""
 
+import json
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -8,16 +10,18 @@ from sqlmodel import Session, select
 
 from src.core import clock
 from src.core.ids import new_id, token_hex
-from src.core.problem import ensure
+from src.core.problem import Problem, ensure
 from src.modules.catalog.seed import seed_workspace
 from src.modules.catalog.templates import get_template, resolve_modules
 from src.modules.reports.service import build_report
 from src.modules.workspace.retention import RETENTION_HOURS
 from src.platform import registry
-from src.platform.context import CommandContext, HistoryRow, WorkspaceRow
+from src.platform.context import CommandContext, HistoryRow, WorkspaceRow, WorkspaceSessionRow
 
 SCHEMA_VERSION = 1
 NAME_MAX = 100
+# B§2：工作區序列化後最多 1,000,000 個字元（JavaScript 字串長度，即 UTF-16 code unit 數）
+WORKSPACE_LIMIT = 1_000_000
 
 
 def _company_name(value: object) -> str:
@@ -107,6 +111,32 @@ def snapshot(db: Session, workspace: WorkspaceRow, version: int) -> dict[str, An
         out.update(spec.snapshot(db, workspace_id))
     out["history"] = _history(db, workspace.id)
     return out
+
+
+def serialized_length(world: dict[str, Any]) -> int:
+    """與 HTTP 回應相同的緊湊 JSON（不跳脫非 ASCII 字元）的 UTF-16 code unit 數，
+    對應參考系統 `JSON.stringify(w).length`：BMP 外的字元（例如 emoji）算 2 個字元。"""
+    text = json.dumps(world, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    return len(text.encode("utf-16-le")) // 2
+
+
+def check_workspace_limit(db: Session, workspace_id: str) -> None:
+    """最終檢查：命令或匯入完成後的工作區快照（含新版本號與 history）不得超過
+    WORKSPACE_LIMIT 個字元，否則 422 workspace_limit。
+
+    一個 UTF-16 code unit 在 UTF-8 最多 3 bytes，因此合法工作區匯出的備份
+    （同一份快照加上固定的外層欄位）一定小於 3 MiB 匯入上限，可以完整還原。"""
+    workspace = db.get(WorkspaceRow, uuid.UUID(workspace_id))
+    session_row = None if workspace is None else db.get(WorkspaceSessionRow, workspace.session_id)
+    if workspace is None or session_row is None:
+        raise Problem(409, "workspace_missing", "請先建立工作區")
+    world = snapshot(db, workspace, session_row.version)
+    ensure(
+        serialized_length(world) <= WORKSPACE_LIMIT,
+        422,
+        "workspace_limit",
+        "工作區超出容量",
+    )
 
 
 def view(ctx: CommandContext) -> dict[str, Any]:

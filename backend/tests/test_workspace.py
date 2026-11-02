@@ -8,12 +8,15 @@ from sqlmodel import Session
 
 from src.app import create_app
 from src.core import clock
+from src.core.problem import Problem
 from src.modules.catalog import seed
 from src.modules.catalog.templates import TEMPLATES
+from src.modules.workspace import service as ws_service
 from src.modules.workspace.retention import purge_abandoned, purge_expired, run_purge
 from src.platform import registry
+from src.platform.pipeline import IMPORT_BODY_LIMIT
 from src.platform.registry import MODULES
-from tests.helpers import ApiClient, new_key
+from tests.helpers import ApiClient, new_key, workspace_ctx
 
 SETUP = "/api/v1/workspace/setup"
 CLEAR = "/api/v1/workspace/clear"
@@ -517,3 +520,105 @@ def test_invalid_auto_setup_defaults_fail_at_startup(
 def test_auto_setup_defaults_not_checked_or_valid(test_settings, overrides: dict) -> None:
     app_config = test_settings.app.model_copy(update=overrides)
     create_app(test_settings.model_copy(update={"app": app_config}))
+
+
+# --- 工作區大小上限（B§2 workspace_limit）---------------------------------------------
+
+
+def test_serialized_length_counts_utf16_units() -> None:
+    """與 JavaScript `JSON.stringify(w).length` 相同：緊湊 JSON、非 ASCII 不跳脫、
+    BMP 外的字元算 2 個字元。"""
+    assert (
+        ws_service.serialized_length({"a": "中😀", "b": [1, True, None]})
+        == len('{"a":"中","b":[1,true,null]}') + 2
+    )
+    assert ws_service.serialized_length({"q": 'x"y'}) == len('{"q":"x\\"y"}')
+
+
+def _pad_notes(db_engine: Engine, chars: int, fill: str = "中") -> None:
+    """把第一位客戶的備註填成 `chars` 個字元，用來把工作區撐到指定大小。"""
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE crm_record SET notes = repeat(:fill, :n) WHERE id ="
+                " (SELECT id FROM crm_record WHERE collection = 'customers' ORDER BY seq LIMIT 1)"
+            ),
+            {"fill": fill, "n": chars},
+        )
+
+
+def _pad_to(api: ApiClient, db_engine: Engine, target: int) -> None:
+    """把工作區快照撐到恰好 `target` 個字元（以「中」填充備註，UTF-8 下最肥的 BMP 字元）。"""
+    _pad_notes(db_engine, 0)
+    base = ws_service.serialized_length(api.snapshot())
+    _pad_notes(db_engine, target - base)
+    assert ws_service.serialized_length(api.snapshot()) == target
+
+
+def test_workspace_limit_boundary(
+    api: ApiClient, db_engine: Engine, test_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """恰好等於上限通過，多 1 個字元就 422 workspace_limit；檢查的是含版本號的完整快照。"""
+    api.setup("general")
+    with Session(db_engine) as db:
+        ctx = workspace_ctx(db, test_settings)
+        length = ws_service.serialized_length(
+            ws_service.snapshot(db, ctx.workspace, ctx.session_row.version)  # type: ignore[arg-type]
+        )
+        monkeypatch.setattr(ws_service, "WORKSPACE_LIMIT", length)
+        ws_service.check_workspace_limit(db, ctx.workspace_id)
+        monkeypatch.setattr(ws_service, "WORKSPACE_LIMIT", length - 1)
+        with pytest.raises(Problem) as exc:
+            ws_service.check_workspace_limit(db, ctx.workspace_id)
+        assert (exc.value.status, exc.value.code) == (422, "workspace_limit")
+
+
+def test_command_cannot_grow_past_workspace_limit(api: ApiClient, db_engine: Engine) -> None:
+    """接近上限的合法工作區，再新增一筆紀錄就超過上限：整筆回滾、版本與資料不變。"""
+    api.setup("general")
+    _pad_to(api, db_engine, ws_service.WORKSPACE_LIMIT - 50)
+    before = api.snapshot()
+    version = api.state()["version"]
+    r = api.mutate("POST", "/api/v1/crm/customers", {"name": "新客戶"})
+    assert _error(r) == (422, "workspace_limit")
+    assert api.snapshot() == before
+    assert api.state()["version"] == version
+    assert _scalar(db_engine, "SELECT count(*) FROM receipt") == 1  # 只有 setup
+
+
+def test_legal_workspace_export_fits_import_cap(api: ApiClient, db_engine: Engine) -> None:
+    """合法工作區的上限（1,000,000 字元，每字元 UTF-8 最多 3 bytes）保證匯出的備份不會超過
+    3 MiB 匯入上限：以最肥的 BMP 字元撐到接近上限，匯出後原樣匯入仍然成功。"""
+    assert ws_service.WORKSPACE_LIMIT * 3 < IMPORT_BODY_LIMIT
+    api.setup("general")
+    _pad_to(api, db_engine, ws_service.WORKSPACE_LIMIT - 1_000)
+    r = api.get("/api/v1/backup/export")
+    assert r.status_code == 200
+    raw = r.content
+    assert 2_900_000 < len(raw) <= IMPORT_BODY_LIMIT
+    state = api.state()
+    r = api.client.request(
+        "POST",
+        "/api/v1/backup/import",
+        content=raw,
+        headers={
+            "Origin": "http://testserver",
+            "x-csrf-token": state["csrf"],
+            "Idempotency-Key": new_key(),
+            "If-Match-Version": str(state["version"]),
+            "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 200, r.text[:300]
+    assert ws_service.serialized_length(api.snapshot()) <= ws_service.WORKSPACE_LIMIT
+
+
+def test_import_over_workspace_limit_rejected(api: ApiClient, db_engine: Engine) -> None:
+    """備份本身小於 3 MiB 但還原後超過 1,000,000 字元：422 workspace_limit，原資料保留。"""
+    api.setup("general")
+    backup = api.get("/api/v1/backup/export").json()
+    before = api.snapshot()
+    backup["collections"]["customers"][0]["notes"] = "x" * ws_service.WORKSPACE_LIMIT
+    r = api.mutate("POST", "/api/v1/backup/import", backup)
+    assert _error(r) == (422, "workspace_limit")
+    assert api.snapshot() == before

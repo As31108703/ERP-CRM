@@ -103,7 +103,8 @@ def check_orders(db: Session, workspace_id: str) -> None:
 
 def check_reservations(db: Session, workspace_id: str) -> None:
     """每個商品的 reserved 等於所有已登錄預留需求的加總（未取消訂單的未出貨量，
-    Task 9 起再加上工單預留），否則 422 reservation_invalid。"""
+    Task 9 起再加上工單預留），否則 422 reservation_invalid。以最終檢查登錄
+    （registry.register_final），在所有模組的 invariants 之後執行。"""
     demand = inventory.reserved_demand(db, workspace_id)
     for p in list_products(db, workspace_id):
         ensure(

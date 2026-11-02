@@ -366,11 +366,9 @@ class CommandPipeline:
         db.flush()
         # handler 可能建立或刪除工作區（setup、clear、import），以資料庫現況為準
         ctx.workspace = load_workspace(db, row.id)
-        # 17：一致性檢查
-        invariants.check_all(ctx)
-        # 18：版本號
+        # 17：版本號
         row.version += 1
-        # 19：history 只記業務命令（setup、clear、import 不記）
+        # 18：history 只記業務命令（setup、clear、import 不記）
         if needs_workspace and ctx.workspace is not None:
             db.add(
                 HistoryRow(
@@ -381,6 +379,9 @@ class CommandPipeline:
                     created_at=now,
                 )
             )
+        # 19：一致性檢查在版本號與 history 寫入之後，檢查的是命令完成後的完整工作區
+        # （工作區大小含新的 history 與版本號）；失敗時兩者隨 SAVEPOINT 一起回滾
+        invariants.check_all(ctx)
         # 20：收據；已達上限時，可修剪的操作先修剪到最近 100 筆
         if prunes_receipts and receipts.count(db, row.id) >= RECEIPT_CAP:
             receipts.prune(db, row.id)

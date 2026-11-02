@@ -907,6 +907,12 @@ _PLANNED = "(SELECT id FROM work_order WHERE status = 'planned')"
             f"UPDATE work_order SET learning_run_id = 'bad id!' WHERE id = {_PLANNED}",
             "learning_id_invalid",
         ),
+        # 已預留工單的 BOM 複本被竄改：預留需求也跟著變，但先回報 BOM 複本不符（參考優先序）
+        (
+            "UPDATE work_order SET bom_snapshot = jsonb_set(bom_snapshot,"
+            " '{components,0,quantity}', '99') WHERE status = 'reserved'",
+            "production_invalid",
+        ),
         # 已預留的工單改回 planned：預留量對不上
         (
             "UPDATE work_order SET status = 'planned' WHERE status = 'reserved'",

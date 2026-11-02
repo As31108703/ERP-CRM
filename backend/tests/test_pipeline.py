@@ -573,3 +573,69 @@ def test_all_specs_order_independent_of_import(monkeypatch, names):
         "projects",
         "administration",
     )
+
+
+def test_final_invariants_run_after_all_module_invariants(api, db_engine, monkeypatch):
+    """最終檢查在所有模組的 invariants 之後依 FINAL_ORDER 執行，與登錄先後無關；
+    檢查時版本號已加 1、本次 history 已寫入（與參考系統先記錄再驗證的順序一致）。"""
+    calls: list[str] = []
+
+    def record(name: str):
+        def check(db, workspace_id: str) -> None:
+            assert workspace_id
+            calls.append(name)
+
+        return check
+
+    def versioned(db, workspace_id: str) -> None:
+        version = db.execute(text("SELECT version FROM workspace_session")).scalar_one()
+        history = db.execute(text("SELECT count(*) FROM history")).scalar_one()
+        calls.append(f"version={version},history={history}")
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    monkeypatch.setattr(registry, "_FINALS", {})
+    monkeypatch.setattr(registry, "FINAL_ORDER", ("second", "first", "last"))
+    registry.register_final("last", versioned)
+    registry.register_final("first", record("final-first"))
+    registry.register_final("second", record("final-second"))
+    registry.register_final("extra", record("final-extra"))
+    for name in ("zeta", "inventory"):
+        registry.register(
+            registry.ModuleSpec(
+                name,
+                lambda _d, _w: {},
+                lambda _d, _w, _x: None,
+                invariants=(record(name),),
+            )
+        )
+    api.state()
+    _seed_workspace(db_engine)
+    assert api.mutate("POST", "/api/v1/_test/command", {}).status_code == 200
+    assert calls == [
+        "inventory",
+        "zeta",
+        "final-second",
+        "final-first",
+        "version=1,history=1",
+        "final-extra",
+    ]
+
+
+def test_final_invariant_failure_rolls_back(api, db_engine, monkeypatch):
+    def broken(_db, _workspace_id: str) -> None:
+        raise Problem(422, "invariant_failed", "測試一致性錯誤")
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    monkeypatch.setattr(registry, "_FINALS", {})
+    registry.register_final("broken", broken)
+    api.state()
+    _seed_workspace(db_engine)
+    assert _error(api.mutate("POST", "/api/v1/_test/command", {})) == (422, "invariant_failed")
+    assert api.state()["version"] == 0
+    assert _scalar(db_engine, "SELECT count(*) FROM history") == 0
+    assert _scalar(db_engine, "SELECT count(*) FROM receipt") == 0
+
+
+def test_final_order_constant():
+    assert registry.FINAL_ORDER == ("reservations", "workspace_limit")
+    assert set(registry._FINALS) == {"reservations", "workspace_limit"}

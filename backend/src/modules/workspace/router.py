@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from src.core.problem import Problem
 from src.middleware.session import session_token
 from src.modules.workspace import service
-from src.platform import invariants, receipts
+from src.platform import invariants, receipts, registry
 from src.platform.context import CommandContext
 from src.platform.pipeline import (
     CommandPipeline,
@@ -18,6 +18,9 @@ from src.platform.pipeline import (
     raw_body,
     touch_session,
 )
+
+# 工作區大小在所有一致性檢查的最後（B§2 validateWorld 的最後一項）
+registry.register_final("workspace_limit", service.check_workspace_limit)
 
 router = APIRouter(prefix="/api/v1/workspace")
 Pipeline = Depends(get_pipeline)
