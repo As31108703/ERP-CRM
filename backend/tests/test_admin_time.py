@@ -541,8 +541,10 @@ def test_restore_validates_change_chain(api: ApiClient, db_engine: Engine) -> No
     assert tampered(set_(["changes", 1, "before", "note"], "別的")) == "office_change_invalid"
     # 最新更正與現有資料不符
     assert tampered(set_(["shifts", 0, "note"], "被改過")) == "office_change_invalid"
-    # 時間順序不符
-    assert tampered(set_(["changes", 0, "at"], good["changes"][1]["at"])) == "office_change_invalid"
+    # 時間順序不符：第一筆更正晚於第二筆。兩次 PATCH 可能落在同一毫秒，
+    # 所以往後推 1 毫秒，確保竄改值一定與原值不同
+    later = clock.iso(clock.parse_instant(good["changes"][1]["at"]) + timedelta(milliseconds=1))
+    assert tampered(set_(["changes", 0, "at"], later)) == "office_change_invalid"
     # 指向不存在的資料
     assert tampered(set_(["changes", 2, "record_id"], str(uuid.uuid4()))) in {
         "office_record_missing",
