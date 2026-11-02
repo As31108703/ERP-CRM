@@ -178,6 +178,8 @@ curl http://localhost:8080/api/health
 
 連接埠：前端 8080 對所有網路介面開放；後端 API 8000 與 PostgreSQL 5436 只綁 `127.0.0.1`，供本機除錯與測試使用，區網其他機器連不到，對外一律經由前端的 nginx。前端埠被占用時，在 `.env` 設定 `FRONTEND_PORT=18080` 之類的值後重新 `docker compose up -d`，再改開 `http://localhost:18080`；其他連接埠請修改 `docker-compose.yaml` 的 `ports`。
 
+要在前面再加一層 HTTPS 反向代理時，請讓它設定 `X-Forwarded-Proto` 與 `X-Forwarded-Host`。前端 nginx 會原樣轉給後端（標頭不存在時才用自己的 scheme 與 Host），後端據此比對寫入請求的 Origin，並在 https 下替 cookie 加上 `Secure`。前端頁面另帶 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY` 與 `Content-Security-Policy: frame-ancestors 'none'`。
+
 ## 環境變數
 
 設定以 pydantic-settings 讀取，巢狀欄位用雙底線（`APP__…`、`DATABASE__…`）分隔。docker compose 的 db 與 backend 會讀取根目錄的 `.env`；frontend 不讀 `.env`，避免把資料庫帳密帶進容器。
