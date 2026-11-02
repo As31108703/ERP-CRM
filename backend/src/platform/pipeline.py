@@ -117,8 +117,18 @@ def _settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+def begin_consistent_read(db: Session) -> None:
+    """在 db 目前沒有交易時，以 REPEATABLE READ 開始下一個交易。
+
+    GET 的讀取分成多個查詢（各模組快照、報表、工作台）；預設的 READ COMMITTED 每個查詢各自
+    取快照，並行命令在讀取途中提交就會讀到前後不一致的資料。REPEATABLE READ 讓整次讀取
+    共用第一個查詢時的快照，也不會擋住命令寫入。交易結束後連線歸還連線池時隔離等級會還原。"""
+    db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+
+
 def touch_session(request: Request) -> Iterator[CommandContext]:
-    """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，再交出唯讀用的 context。"""
+    """GET 用的 FastAPI 依賴：計入速率限制、更新最後存取時間並提交，
+    再以單一 REPEATABLE READ 交易交出唯讀用的 context。"""
     with Session(request.app.state.engine, expire_on_commit=False) as db:
         try:
             row = lock_session(db, session_token(request), clock.utcnow())
@@ -129,6 +139,7 @@ def touch_session(request: Request) -> Iterator[CommandContext]:
         except BaseException:
             db.rollback()
             raise
+        begin_consistent_read(db)
         yield CommandContext(
             db=db,
             session_row=row,

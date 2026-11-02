@@ -639,3 +639,36 @@ def test_final_invariant_failure_rolls_back(api, db_engine, monkeypatch):
 def test_final_order_constant():
     assert registry.FINAL_ORDER == ("reservations", "workspace_limit")
     assert set(registry._FINALS) == {"reservations", "workspace_limit"}
+
+
+# --- GET 讀取的一致性 -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/api/v1/workspace/view", "/api/v1/backup/export"])
+def test_get_reads_one_snapshot(api, db_engine, monkeypatch, path):
+    """GET 讀取途中有其他交易提交，同一次讀取的後續查詢仍看到讀取開始時的資料。"""
+    api.setup("general")
+
+    def first(db, workspace_id: str) -> dict:
+        name = db.execute(
+            text("SELECT company_name FROM workspace WHERE id = :id"), {"id": workspace_id}
+        ).scalar_one()
+        # 模擬並行命令在讀取途中提交
+        with db_engine.begin() as conn:
+            conn.execute(text("UPDATE workspace SET company_name = '途中改名'"))
+        return {"first": name}
+
+    def second(db, workspace_id: str) -> dict:
+        name = db.execute(
+            text("SELECT company_name FROM workspace WHERE id = :id"), {"id": workspace_id}
+        ).scalar_one()
+        return {"second": name}
+
+    monkeypatch.setattr(registry, "_SPECS", {})
+    registry.register(registry.ModuleSpec("inventory", first, lambda _d, _w, _x: None))
+    registry.register(registry.ModuleSpec("wallets", second, lambda _d, _w, _x: None))
+    r = api.get(path)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    world = body["workspace"] if "first" in body.get("workspace", {}) else body["collections"]
+    assert world["first"] == world["second"] == "測試公司"
